@@ -1,32 +1,26 @@
 #!/bin/bash
 
 # ==========================================
-# Debian Chrome Kiosk - Zero to Ready Script
-# Полная установка с нуля (без графической оболочки)
+# Debian Chrome Kiosk - ИСПРАВЛЕННАЯ ВЕРСИЯ
 # ==========================================
 
-set -e  # Остановка при любой ошибке
+set -e
 
-# --- Настройки (можно изменить) ---
+# --- Настройки ---
 KIOSK_USER="kiosk"
 KIOSK_URL="https://www.google.com"
 CHROME_TYPE="chrome"  # chrome или chromium
 REBOOT_AFTER=false
-KEYBOARD_LAYOUT="us"  # us, ru, de и т.д.
-TIMEZONE="Europe/Moscow"
-# ----------------------------------
+KEYBOARD_LAYOUT="us"
+# -----------------
 
-# Цвета вывода
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+# Проверка root
+if [ "$EUID" -ne 0 ]; then echo "Запустите от root: sudo $0"; exit 1; fi
 
-# Функции логирования
-log() { echo -e "${GREEN}[INFO]${NC} $(date '+%H:%M:%S') $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $(date '+%H:%M:%S') $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $(date '+%H:%M:%S') $1"; exit 1; }
-step() { echo -e "\n${BLUE}▶${NC} ${BLUE}$1${NC}"; }
-
-# Проверка прав root
-if [ "$EUID" -ne 0 ]; then error "Запустите от root: sudo $0"; fi
+# Цвета
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+log() { echo -e "${GREEN}[INFO]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 # Парсинг аргументов
 while [[ $# -gt 0 ]]; do
@@ -36,227 +30,166 @@ while [[ $# -gt 0 ]]; do
     -t|--type) CHROME_TYPE="$2"; shift 2 ;;
     -r|--reboot) REBOOT_AFTER=true; shift ;;
     -k|--keyboard) KEYBOARD_LAYOUT="$2"; shift 2 ;;
-    -tz|--timezone) TIMEZONE="$2"; shift 2 ;;
-    -h|--help) 
-      echo "Использование: $0 [опции]"
-      echo "  -u, --user USER         Имя пользователя (по умолчанию: kiosk)"
-      echo "  -url, --url URL         Стартовый URL (по умолчанию: https://www.google.com)"
-      echo "  -t, --type TYPE         Тип браузера: chrome или chromium (по умолчанию: chrome)"
-      echo "  -k, --keyboard LAYOUT   Раскладка клавиатуры (по умолчанию: us)"
-      echo "  -tz, --timezone TZ      Часовой пояс (по умолчанию: Europe/Moscow)"
-      echo "  -r, --reboot           Автоматическая перезагрузка"
-      echo "  -h, --help             Показать справку"
-      exit 0 ;;
     *) error "Неизвестный параметр: $1" ;;
   esac
 done
 
-# Проверка версии Debian
-if ! grep -qi "debian" /etc/os-release; then
-  warn "Этот скрипт оптимизирован для Debian. Продолжение через 5 секунд..."
-  sleep 5
-fi
+log "Начало установки Chrome Kiosk для $KIOSK_USER..."
 
-echo "======================================"
-log "Начало развертывания Chrome Kiosk"
-log "Пользователь: $KIOSK_USER"
-log "Браузер: $CHROME_TYPE"
-log "URL: $KIOSK_URL"
-log "Раскладка: $KEYBOARD_LAYOUT"
-log "Часовой пояс: $TIMEZONE"
-echo "======================================"
+# === ЭТАП 1: Установка пакетов ===
+log "Установка X11 и браузера..."
+apt update && apt install -y --no-install-recommends \
+  xorg xinit openbox dbus-x11 x11-xserver-utils xfonts-base \
+  wget ca-certificates
 
-# === ЭТАП 1: Обновление и базовые пакеты ===
-step "Этап 1: Обновление системы и установка базовых пакетов"
-apt update && apt full-upgrade -y
-apt install -y --no-install-recommends \
-  xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all \
-  xinit openbox dbus-x11 x11-xserver-utils xfonts-base \
-  wget curl ca-certificates locales
-
-# Настройка локали
-sed -i "s/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/" /etc/locale.gen
-locale-gen
-update-locale LANG=en_US.UTF-8
-
-# Настройка часового пояса
-timedatectl set-timezone "$TIMEZONE"
-
-# Отключение экранных заставителей в консоли
-log "Отключение заставок консоли..."
-sed -i 's/BLANK_TIME=.*/BLANK_TIME=0/' /etc/kbd/config 2>/dev/null || echo "BLANK_TIME=0" >> /etc/kbd/config
-sed -i 's/POWERDOWN_TIME=.*/POWERDOWN_TIME=0/' /etc/kbd/config 2>/dev/null || echo "POWERDOWN_TIME=0" >> /etc/kbd/config
-
-# === ЭТАП 2: Установка браузера ===
-step "Этап 2: Установка браузера ($CHROME_TYPE)"
-
+# Установка браузера
 if [ "$CHROME_TYPE" = "chrome" ]; then
   if ! command -v google-chrome-stable &> /dev/null; then
-    log "Установка Google Chrome..."
-    wget --timeout=30 -q -O /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+    wget -qO /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
     dpkg -i /tmp/chrome.deb || apt-get install -f -y
-    rm -f /tmp/chrome.deb
-  else
-    warn "Google Chrome уже установлен"
+    rm /tmp/chrome.deb
   fi
   BROWSER_CMD="google-chrome-stable"
-elif [ "$CHROME_TYPE" = "chromium" ]; then
-  log "Установка Chromium..."
+  CONFIG_DIR="google-chrome"
+else
   apt install -y chromium-browser
   BROWSER_CMD="chromium-browser"
-else
-  error "Неверный тип браузера. Используйте 'chrome' или 'chromium'"
+  CONFIG_DIR="chromium"  # или chromium-browser в некоторых версиях
 fi
 
-# === ЭТАП 3: Создание пользователя ===
-step "Этап 3: Создание и настройка пользователя $KIOSK_USER"
-
+# === ЭТАП 2: Создание пользователя ===
 if ! id "$KIOSK_USER" &>/dev/null; then
-  log "Создание пользователя $KIOSK_USER..."
   useradd -m -s /bin/bash -G audio,video,cdrom "$KIOSK_USER"
   echo "$KIOSK_USER:kiosk123" | chpasswd
-  log "✓ Пользователь создан (пароль: kiosk123)"
-else
-  warn "Пользователь $KIOSK_USER уже существует"
+  log "Создан пользователь $KIOSK_USER (пароль: kiosk123)"
 fi
 
-# Ограничение прав пользователя (опционально, но рекомендуется)
-log "Настройка ограничений пользователя..."
-usermod -L "$KIOSK_USER"  # Блокировка смены пароля
-
-# === ЭТАП 4: Настройка автологина ===
-step "Этап 4: Настройка автологина в консоли"
-
+# === ЭТАП 3: Настройка автологина (НАДЕЖНЫЙ СПОСОБ) ===
+log "Настройка автологина..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
 Type=idle
+TimeoutStartSec=0
+
+[Install]
+WantedBy=getty.target
 EOF
 
-# === ЭТАП 5: Создание скрипта киоска ===
-step "Этап 5: Создание скрипта автозапуска Chrome"
+# Альтернативный метод через getty override
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
+Type=idle
+StandardInput=tty
+StandardOutput=tty
+EOF
 
-KIOSK_SCRIPT="/home/$KIOSK_USER/chrome-kiosk.sh"
+# === ЭТАП 4: Создание скрипта киоска ===
+KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
 cat > "$KIOSK_SCRIPT" <<EOF
 #!/bin/bash
 
-# Настройка клавиатуры
-setxkbmap "$KEYBOARD_LAYOUT"
+# Логирование
+exec > /home/$KIOSK_USER/kiosk.log 2>&1
+set -x
 
-# Очистка старых сессий Chrome
-rm -rf ~/.config/$CHROME_TYPE/Singleton*
-
-# Запуск Chrome в бесконечном цикле
-while true; do
-  $BROWSER_CMD \\
-    --no-first-run \\
-    --disable \\
-    --disable-translate \\
-    --disable-infobars \\
-    --disable-suggestions-service \\
-    --disable-save-password-bubble \\
-    --disable-session-crashed-bubble \\
-    --disable-features=TranslateUI \\
-    --disable-background-networking \\
-    --disable-sync \\
-    --disable-default-apps \\
-    --no-default-browser-check \\
-    --disable-web-security \\
-    --incognito \\
-    --kiosk \\
-    --start-maximized \\
-    "$KIOSK_URL"
-    
-  # Перезапуск через 1 секунду
-  sleep 1
-done
-EOF
-
-chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_SCRIPT"
-chmod +x "$KIOSK_SCRIPT"
-
-# === ЭТАП 6: Настройка X-сессии ===
-step "Этап 6: Настройка автозапуска графики"
-
-# .xinitrc для автозапуска
-cat > "/home/$KIOSK_USER/.xinitrc" <<EOF
-#!/bin/bash
-
-# Отключение энергосбережения дисплея
+# Настройки X11
+export DISPLAY=:0
 xset -dpms
 xset s off
 xset s noblank
 
-# Установка разрешения экрана (автоматически)
-xrandr --auto
+# Очистка старых сессий
+rm -rf ~/.config/$CONFIG_DIR/Singleton*
 
-# Запуск Openbox (минимальный оконный менеджер)
-exec openbox-session &
+# Запуск браузера в цикле
+while true; do
+  $BROWSER_CMD \
+    --no-first-run \
+    --disable \
+    --kiosk \
+    --disable-translate \
+    --disable-infobars \
+    --incognito \
+    "$KIOSK_URL"
+  
+  sleep 2  # Подождать 2 секунды перед перезапуском
+done
+EOF
 
-# Запуск Chrome
+chmod +x "$KIOSK_SCRIPT"
+chown $KIOSK_USER:$KIOSK_USER "$KIOSK_SCRIPT"
+
+# === ЭТАП 5: Настройка X через .profile (НАДЕЖНО) ===
+# .bashrc не всегда выполняется при автологине
+PROFILE_FILE="/home/$KIOSK_USER/.profile"
+if ! grep -q "CHROME_KIOSK" "$PROFILE_FILE"; then
+  cat >> "$PROFILE_FILE" <<EOF
+
+# CHROME_KIOSK - Автозапуск
+if [ "\$(tty)" = "/dev/tty1" ]; then
+  startx >> /home/$KIOSK_USER/xorg.log 2>&1
+fi
+EOF
+  chown $KIOSK_USER:$KIOSK_USER "$PROFILE_FILE"
+fi
+
+# === ЭТАП 6: Настройка .xinitrc (ИСПРАВЛЕННАЯ ВЕРСИЯ) ===
+cat > "/home/$KIOSK_USER/.xinitrc" <<EOF
+#!/bin/bash
+
+# Запуск Openbox в фоне (без exec!)
+openbox-session &
+
+# Запуск киоск-скрипта
 exec $KIOSK_SCRIPT
 EOF
 
-chown "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.xinitrc"
 chmod +x "/home/$KIOSK_USER/.xinitrc"
+chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
 
-# .bashrc для запуска X при логине
-BASHRC_FILE="/home/$KIOSK_USER/.bashrc"
-if ! grep -q "CHROME_KIOSK_STARTX" "$BASHRC_FILE"; then
-  cat >> "$BASHRC_FILE" <<EOF
+# === ЭТАП 7: Создание systemd service (РЕЗЕРВНЫЙ ВАРИАНТ) ===
+log "Создание systemd service..."
+cat > /etc/systemd/system/kiosk.service <<EOF
+[Unit]
+Description=Chrome Kiosk
+After=graphical.target
 
-# CHROME_KIOSK_STARTX - АвтозапускChrome Kiosk
-if [ "\$(tty)" = "/dev/tty1" ]; then
-  exec startx
-fi
+[Service]
+User=$KIOSK_USER
+PAMName=login
+TTYPath=/dev/tty1
+ExecStart=/usr/bin/startx
+StandardInput=tty
+StandardOutput=tty
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
 EOF
-  chown "$KIOSK_USER:$KIOSK_USER" "$BASHRC_FILE"
-fi
 
-# === ЭТАП 7: Настройка Openbox ===
-step "Этап 7: Настройка Openbox"
-
-mkdir -p "/home/$KIOSK_USER/.config/openbox"
-cat > "/home/$KIOSK_USER/.config/openbox/autostart" <<EOF
-# Отключение всех горячих клавиш
-xmodmap -e "keycode 37 = "  # Ctrl
-xmodmap -e "keycode 64 = "  # Alt
-EOF
-
-chown -R "$KIOSK_USER:$KIOSK_USER" "/home/$KIOSK_USER/.config"
-
-# === ЭТАП 8: Финальная настройка ===
-step "Этап 8: Применение финальных настроек"
-
-# Отключение сообщений системы в консоли
-sed -i 's/#KernelPrintLast/Kern elPrintLast/' /etc/sysctl.conf 2>/dev/null || true
-echo "kernel.printk = 3 3 3 3" >> /etc/sysctl.conf
-
-# Перезагрузка systemd
+# Включаем сервис
 systemctl daemon-reload
+systemctl enable kiosk.service
 
-# Очистка кэша пакетов
-apt clean
-rm -rf /tmp/*
-
-# === ЗАВЕРШЕНИЕ ===
-echo "======================================"
-log "✅ Развертывание успешно завершено!"
-echo "======================================"
-log "Пользователь: $KIOSK_USER (пароль: kiosk123)"
-log "Браузер: $CHROME_TYPE"
-log "URL: $KIOSK_URL"
-log "Раскладка: $KEYBOARD_LAYOUT"
-echo "======================================"
+# === ЭТАП 8: Завершение ===
+log "Настройка завершена!"
+log "Логи будут сохраняться в /home/$KIOSK_USER/kiosk.log"
 
 if [ "$REBOOT_AFTER" = true ]; then
-  log "Перезагрузка через 10 секунд... (Нажмите Ctrl+C для отмены)"
-  sleep 10
+  log "Перезагрузка через 5 секунд..."
+  sleep 5
   reboot
 else
-  warn "⚠️  НЕОБХОДИМА ПЕРЕЗАГРУЗКА!"
-  log "Выполните: sudo reboot"
-  log "После перезагрузки Chrome запустится автоматически"
+  echo ""
+  log "⚠️ НУЖНА ПЕРЕЗАГРУЗКА!"
+  log "После перезагрузки проверьте логи:"
+  log "  tail -f /home/$KIOSK_USER/kiosk.log"
+  log "  cat /home/$KIOSK_USER/.xsession-errors"
 fi
