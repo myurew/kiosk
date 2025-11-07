@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Debian Chrome Kiosk - ПРОВЕРЕННАЯ РАБОЧАЯ ВЕРСИЯ
-# Без сложных оптимизаций, просто работает
+# Debian Chrome Kiosk - ИСПРАВЛЕНЫ ПРАВА ДОСТУПА
 # ==========================================
 
 set -e
@@ -44,7 +43,7 @@ else
   log "Google Chrome уже установлен"
 fi
 
-# === ЭТАП 3: Создание пользователя ===
+# === ЭТАП 3: Создание пользователя и настройка прав ===
 if ! id "$KIOSK_USER" &>/dev/null; then
   log "Создание пользователя $KIOSK_USER..."
   useradd -m -s /bin/bash $KIOSK_USER
@@ -54,43 +53,57 @@ else
   log "Пользователь $KIOSK_USER уже существует"
 fi
 
-# === ЭТАП 4: Создание ПРОСТОГО скрипта киоска ===
+# ДАЕМ ПРАВА ДОСТУПА К X СЕРВЕРУ
+log "Настройка прав доступа..."
+usermod -a -G audio,video,tty $KIOSK_USER
+
+# Разрешаем пользователю запускать X сервер
+if [ -f /etc/X11/Xwrapper.config ]; then
+  echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
+else
+  echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
+fi
+
+# === ЭТАП 4: Создание скрипта киоска ===
 KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
-log "Создание простого скрипта киоска..."
+log "Создание скрипта киоска..."
 
 cat > "$KIOSK_SCRIPT" <<'EOF'
 #!/bin/bash
 
-# Простое логирование
-echo "=== Запуск Kiosk: $(date) ===" > /home/$USER/kiosk.log 2>&1
+# Создаем директорию для логов
+mkdir -p /home/$USER/.logs
+LOGFILE="/home/$USER/.logs/kiosk.log"
+
+echo "=== Запуск Kiosk: $(date) ===" > $LOGFILE
+echo "Пользователь: $USER" >> $LOGFILE
+echo "Домашняя директория: $HOME" >> $LOGFILE
 
 # Даем время на запуск X
-sleep 5
+sleep 3
 
 # Проверяем X сервер
-if ! xdpyinfo >/dev/null 2>&1; then
-    echo "X сервер не доступен" >> /home/$USER/kiosk.log
+echo "Проверка X сервера..." >> $LOGFILE
+if xdpyinfo >> $LOGFILE 2>&1; then
+    echo "✓ X сервер работает" >> $LOGFILE
+else
+    echo "✗ X сервер не доступен" >> $LOGFILE
     exit 1
 fi
 
-echo "X сервер работает" >> /home/$USER/kiosk.log
+echo "Настройка энергосбережения..." >> $LOGFILE
+xset -dpms >> $LOGFILE 2>&1
+xset s off >> $LOGFILE 2>&1
+xset s noblank >> $LOGFILE 2>&1
 
-# Базовые настройки
-xset -dpms
-xset s off
-xset s noblank
-
-# Запускаем Chrome с минимальными флагами
-# БЕЗ --disable и других проблемных флагов
-google-chrome-stable \
+echo "Запуск Chrome..." >> $LOGFILE
+exec google-chrome-stable \
   --no-first-run \
   --disable-translate \
   --disable-infobars \
   --incognito \
   --kiosk \
-  "https://www.google.com" >> /home/$USER/kiosk.log 2>&1
-
-echo "Chrome завершил работу: $(date)" >> /home/$USER/kiosk.log
+  "https://www.google.com" >> $LOGFILE 2>&1
 EOF
 
 chmod +x "$KIOSK_SCRIPT"
@@ -101,101 +114,187 @@ log "Настройка X-сессии..."
 
 cat > "/home/$KIOSK_USER/.xinitrc" <<'EOF'
 #!/bin/bash
-# Простой .xinitrc
+
+# Логируем запуск
+echo "Запуск .xinitrc: $(date)" > /home/$USER/.logs/xinitrc.log
+
+# Ждем инициализации
+sleep 2
 
 # Запускаем Openbox
-openbox-session &
+echo "Запуск Openbox..." >> /home/$USER/.logs/xinitrc.log
+openbox-session >> /home/$USER/.logs/xinitrc.log 2>&1 &
 
-# Ждем немного
+# Ждем запуска Openbox
 sleep 3
 
-# Запускаем Chrome
-exec /home/$USER/kiosk.sh
+# Запускаем киоск
+echo "Запуск kiosk.sh..." >> /home/$USER/.logs/xinitrc.log
+exec /home/$USER/kiosk.sh >> /home/$USER/.logs/xinitrc.log 2>&1
 EOF
 
 chmod +x "/home/$KIOSK_USER/.xinitrc"
 chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
 
-# === ЭТАП 6: Настройка автоматического логина ===
-log "Настройка автоматического логина..."
+# === ЭТАП 6: Настройка автоматического запуска ===
+log "Настройка автоматического запуска..."
 
-# Создаем сервис для автологина на tty1
-cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
-Type=simple
-EOF
-
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-
-# Создаем сервис для запуска X после логина
-cat > /etc/systemd/system/x11.service <<EOF
+# Создаем systemd сервис для запуска X при загрузке
+cat > /etc/systemd/system/x11-kiosk.service <<EOF
 [Unit]
-Description=Start X11 on tty1
-After=getty@tty1.service
+Description=X11 Kiosk
+After=network.target
 
 [Service]
 User=$KIOSK_USER
 Group=$KIOSK_USER
-Type=simple
-ExecStart=/usr/bin/startx /home/$KIOSK_USER/.xinitrc -- :0 vt1
-Restart=always
-RestartSec=5
+WorkingDirectory=/home/$KIOSK_USER
 Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/$KIOSK_USER/.Xauthority
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/bin/startx /home/$KIOSK_USER/.xinitrc -- :0 -nocursor -novtswitch
+Restart=always
+RestartSec=10
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable x11.service
+systemctl enable x11-kiosk.service
 
-# === ЭТАП 7: ФИНАЛЬНАЯ ПОДГОТОВКА ===
-log "Финальная подготовка..."
+# === ЭТАП 7: Настройка прав для X сервера ===
+log "Настройка прав X сервера..."
 
-# Даем пользователю права на X
-usermod -a -G video $KIOSK_USER
+# Разрешаем любому пользователю запускать X
+if ! grep -q "allowed_users=anybody" /etc/X11/Xwrapper.config 2>/dev/null; then
+  echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
+fi
 
-# Создаем тестовый скрипт для проверки
-cat > /home/$KIOSK_USER/test-chrome.sh <<'EOF'
+# Создаем xinitrc для системы
+mkdir -p /etc/X11/xinit
+cat > /etc/X11/xinit/xinitrc <<'EOF'
 #!/bin/bash
-echo "=== Тест Chrome ==="
-echo "Пользователь: \$USER"
-echo "DISPLAY: \$DISPLAY"
 
-# Проверяем X
-echo "Проверка X сервера..."
-xdpyinfo && echo "✓ X сервер работает" || echo "✗ X сервер не работает"
+# Системный xinitrc
+exec openbox-session
+EOF
+
+chmod +x /etc/X11/xinit/xinitrc
+
+# === ЭТАП 8: ТЕСТОВЫЙ СКРИПТ С ПРАВАМИ ===
+log "Создание тестового скрипта..."
+
+cat > /home/$KIOSK_USER/test-kiosk.sh <<'EOF'
+#!/bin/bash
+
+echo "=== ТЕСТ KIOSK ==="
+echo "Время: $(date)"
+echo "Пользователь: $USER"
+echo "Домашняя директория: $HOME"
+echo ""
+
+# Проверяем права
+echo "1. Проверка прав:"
+echo "   UID: $UID"
+echo "   Группы: $(groups)"
+echo ""
+
+# Проверяем X сервер
+echo "2. Проверка X сервера:"
+if command -v xdpyinfo >/dev/null 2>&1; then
+    echo "   xdpyinfo найден"
+    # Пробуем запустить с перенаправлением ошибок
+    xdpyinfo 2>&1 | head -5 && echo "   ✓ X сервер доступен" || echo "   ✗ Ошибка доступа к X серверу"
+else
+    echo "   ✗ xdpyinfo не найден"
+fi
+echo ""
 
 # Проверяем Chrome
-echo "Проверка Chrome..."
-which google-chrome-stable && echo "✓ Chrome найден" || echo "✗ Chrome не найден"
+echo "3. Проверка Chrome:"
+if command -v google-chrome-stable >/dev/null 2>&1; then
+    echo "   ✓ Chrome найден"
+    echo "   Версия: $(google-chrome-stable --version 2>/dev/null || echo 'не доступна')"
+else
+    echo "   ✗ Chrome не найден"
+fi
+echo ""
 
-# Пробуем запустить Chrome на 5 секунд
-echo "Тестовый запуск Chrome..."
-timeout 5s google-chrome-stable --no-first-run --disable-gpu --kiosk "https://www.google.com" 2>&1 | head -20
+# Проверяем файлы
+echo "4. Проверка файлов:"
+ls -la /home/$USER/kiosk.sh 2>/dev/null && echo "   ✓ kiosk.sh существует" || echo "   ✗ kiosk.sh не найден"
+ls -la /home/$USER/.xinitrc 2>/dev/null && echo "   ✓ .xinitrc существует" || echo "   ✗ .xinitrc не найден"
+echo ""
+
+# Простой тест X
+echo "5. Простой тест X:"
+if xhost >/dev/null 2>&1; then
+    echo "   ✓ X сервер отвечает"
+else
+    echo "   ✗ X сервер не отвечает"
+    echo "   Попробуйте запустить: startx"
+fi
+echo ""
+
 echo "Тест завершен"
 EOF
 
-chmod +x /home/$KIOSK_USER/test-chrome.sh
-chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/test-chrome.sh
+chmod +x /home/$KIOSK_USER/test-kiosk.sh
+chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/test-kiosk.sh
 
-# === ЭТАП 8: ИНФОРМАЦИЯ ===
+# === ЭТАП 9: РУЧНОЙ ЗАПУСК ДЛЯ ТЕСТА ===
+log "Создание скрипта ручного запуска..."
+
+cat > /home/$KIOSK_USER/start-kiosk.sh <<'EOF'
+#!/bin/bash
+
+echo "Ручной запуск Kiosk..."
+echo "Если X сервер не запущен, он будет запущен автоматически"
+
+# Проверяем запущен ли X
+if ! xdpyinfo >/dev/null 2>&1; then
+    echo "Запуск X сервера..."
+    startx /home/$USER/.xinitrc -- :0 -nocursor
+else
+    echo "X сервер уже запущен, запускаем kiosk..."
+    /home/$USER/kiosk.sh
+fi
+EOF
+
+chmod +x /home/$KIOSK_USER/start-kiosk.sh
+chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/start-kiosk.sh
+
+# === ЭТАП 10: ФИНАЛЬНАЯ НАСТРОЙКА ===
+log "Финальная настройка прав..."
+
+# Даем права на /dev/tty0 и /dev/tty1
+chmod a+rw /dev/tty0 2>/dev/null || true
+chmod a+rw /dev/tty1 2>/dev/null || true
+
+# Создаем директорию для логов
+mkdir -p /home/$KIOSK_USER/.logs
+chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.logs
+
+# Разрешаем пользователю запускать X
+if which setcap >/dev/null 2>&1; then
+    setcap 'cap_sys_tty_config+ep' /usr/bin/startx 2>/dev/null || true
+fi
+
 log "✅ Установка завершена!"
 log ""
-log "🔧 ДЛЯ ПРОВЕРКИ ДО ПЕРЕЗАГРУЗКИ:"
+log "🔧 ДЛЯ ПРОВЕРКИ:"
 log "1. Переключитесь на пользователя kiosk:"
-log "   sudo -u kiosk -i"
+log "   sudo -u kiosk -s"
 log "2. Запустите тестовый скрипт:"
-log "   ./test-chrome.sh"
-log "3. Или запустите X вручную:"
-log "   startx"
+log "   ./test-kiosk.sh"
+log "3. Если тест проходит, попробуйте ручной запуск:"
+log "   ./start-kiosk.sh"
 log ""
-log "📋 ПОСЛЕ ПЕРЕЗАГРУЗКИ:"
-log "   • Система автоматически войдет под пользователем kiosk"
-log "   • Запустится Chrome в режиме киоска"
-log "   • Логи: /home/$KIOSK_USER/kiosk.log"
+log "📋 ЛОГИ:"
+log "   • Киоск: /home/$KIOSK_USER/.logs/kiosk.log"
+log "   • Xinitrc: /home/$KIOSK_USER/.logs/xinitrc.log"
 
 if [ "$REBOOT_AFTER" = true ]; then
   log ""
@@ -204,6 +303,6 @@ if [ "$REBOOT_AFTER" = true ]; then
   reboot
 else
   log ""
-  log "⚠️  ВЫПОЛНИТЕ ПЕРЕЗАГРУЗКУ:"
-  log "sudo reboot"
+  log "⚠️  После перезагрузки система автоматически запустит киоск"
+  log "   Или выполните: sudo reboot"
 fi
