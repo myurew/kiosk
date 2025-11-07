@@ -196,7 +196,7 @@ log "Настройка автологина через systemd..."
 systemctl disable getty@tty1.service 2>/dev/null || true
 systemctl mask getty@tty1.service 2>/dev/null || true
 
-# Создаем собственный сервис
+# Создаем собственный сервис (исправленная версия)
 cat > /etc/systemd/system/kiosk.service <<EOF
 [Unit]
 Description=Chrome Kiosk ($ENV_TYPE)
@@ -204,18 +204,14 @@ After=network.target
 
 [Service]
 User=$KIOSK_USER
-PAMName=login
-TTYPath=/dev/tty1
-ExecStart=/usr/bin/xinit /home/$KIOSK_USER/.xinitrc -- /usr/bin/Xorg :0 -novtswitch -keeptty
-StandardInput=tty
-StandardOutput=tty
-StandardError=tty
+Type=simple
+ExecStart=/bin/bash -c 'while true; do startx /home/$KIOSK_USER/.xinitrc -- :0 -novtswitch -keeptty; sleep 5; done'
 Restart=always
 RestartSec=5
-KillMode=process
+Environment=DISPLAY=:0
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
 EOF
 
 # Включаем сервис
@@ -232,6 +228,7 @@ if [ "$ENV_TYPE" = "virtualbox" ]; then
 # Автоматическое определение разрешения в VirtualBox
 if command -v xrandr > /dev/null; then
     # Устанавливаем максимальное доступное разрешение
+    sleep 2
     xrandr --auto
 fi
 EOF
