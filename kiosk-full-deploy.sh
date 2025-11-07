@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # ==========================================
-# Debian Chrome Kiosk - РАБОЧАЯ ВЕРСИЯ
+# Debian Chrome Kiosk - С АВТООПРЕДЕЛЕНИЕМ ПАКЕТОВ
 # ==========================================
 
 set -e
 KIOSK_USER="kiosk"
 KIOSK_URL="https://www.google.com"
-CHROME_TYPE="chromium"  # Рекомендую chromium для теста
+CHROME_TYPE="chromium"  # Теперь по умолчанию chromium
 REBOOT_AFTER=false
 KEYBOARD_LAYOUT="us"
 
@@ -16,6 +16,37 @@ if [ "$EUID" -ne 0 ]; then echo "Запустите от root: sudo $0"; exit 1;
 log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; exit 1; }
 
+# Функция определения правильного имени пакета chromium
+detect_chromium_package() {
+  log "Поиск доступного пакета Chromium..."
+  
+  # Проверяем доступные варианты
+  if apt-cache search --names-only "^chromium$" | grep -q "^chromium"; then
+    echo "chromium"
+    return 0
+  elif apt-cache search --names-only "^chromium-browser$" | grep -q "^chromium-browser"; then
+    echo "chromium-browser"
+    return 0
+  else
+    # Возможно, нужен contrib репозиторий
+    log "Пакет не найден. Проверка репозиториев..."
+    if ! grep -q "contrib" /etc/apt/sources.list; then
+      warn "Репозиторий 'contrib' не найден. Добавляю..."
+      sed -i 's/main$/main contrib/' /etc/apt/sources.list
+      apt update
+    fi
+    
+    # Повторная проверка
+    if apt-cache search --names-only "^chromium$" | grep -q "^chromium"; then
+      echo "chromium"
+      return 0
+    fi
+    
+    return 1  # Пакет не найден
+  fi
+}
+
+# Парсинг аргументов
 while [[ $# -gt 0 ]]; do
   case $1 in
     -u|--user) KIOSK_USER="$2"; shift 2 ;;
@@ -27,93 +58,121 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-log "Установка Chrome Kiosk..."
+log "Начало установки Chrome Kiosk для $KIOSK_USER..."
 
-# === УСТАНОВКА ПАКЕТОВ ===
+# === ЭТАП 1: Установка пакетов ===
+log "Установка X11 и браузера..."
 apt update && apt install -y --no-install-recommends \
   xorg xinit openbox dbus-x11 x11-xserver-utils xfonts-base \
   wget ca-certificates
 
-# Установка браузера
+# === УСТАНОВКА БРАУЗЕРА С АВТООПРЕДЕЛЕНИЕМ ===
 if [ "$CHROME_TYPE" = "chrome" ]; then
-  wget -qO /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-  dpkg -i /tmp/chrome.deb || apt-get install -f -y
-  rm /tmp/chrome.deb
+  # Google Chrome (стабильный вариант)
+  if ! command -v google-chrome-stable &> /dev/null; then
+    log "Установка Google Chrome (рекомендуется)..."
+    wget -qO /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+    dpkg -i /tmp/chrome.deb || apt-get install -f -y
+    rm /tmp/chrome.deb
+  fi
   BROWSER_CMD="google-chrome-stable"
   CONFIG_DIR="google-chrome"
-else
-  apt install -y chromium-browser
-  BROWSER_CMD="chromium-browser"
-  CONFIG_DIR="chromium"
+  
+elif [ "$CHROME_TYPE" = "chromium" ]; then
+  # Chromium (автоопределение пакета)
+  CHROMIUM_PKG=$(detect_chromium_package)
+  
+  if [ -n "$CHROMIUM_PKG" ]; then
+    log "Установка $CHROMIUM_PKG..."
+    apt install -y "$CHROMIUM_PKG"
+  else
+    # Альтернатива: snap
+    warn "Пакет не найден в репозиториях. Пробую snap..."
+    apt install -y snapd
+    snap install chromium
+    
+    # Создаем symlink для удобства
+    ln -sf /snap/bin/chromium /usr/local/bin/chromium-browser
+  fi
+  
+  # Определяем команду запуска
+  if command -v chromium &> /dev/null; then
+    BROWSER_CMD="chromium"
+    CONFIG_DIR="chromium"
+  elif command -v chromium-browser &> /dev/null; then
+    BROWSER_CMD="chromium-browser"
+    CONFIG_DIR="chromium-browser"
+  else
+    error "Не удалось установить Chromium. Используйте --type chrome"
+  fi
 fi
 
-# === СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ ===
+# === ОСТАЛЬНАЯ ЧАСТЬ СКРИПТА (ИЗМЕНЕНА) ===
+
+# Создание пользователя
 if ! id "$KIOSK_USER" &>/dev/null; then
   useradd -m -s /bin/bash -G audio,video,cdrom "$KIOSK_USER"
   echo "$KIOSK_USER:kiosk123" | chpasswd
   log "Создан пользователь $KIOSK_USER"
 fi
 
-# === СОЗДАНИЕ СКРИПТА КИОСКА ===
+# Настройка автологина
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
+Type=idle
+TimeoutStartSec=0
+EOF
+
+# Создание скрипта киоска с логированием
 KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
 cat > "$KIOSK_SCRIPT" <<EOF
 #!/bin/bash
-# ЛОГИРОВАНИЕ ВСЕГО!
-exec > /home/$KIOSK_USER/kiosk-\$(date +%Y%m%d-%H%M%S).log 2>&1
+exec > /home/$KIOSK_USER/kiosk.log 2>&1
 set -x
 
-# Ждем готовности X сервера (КРИТИЧНО!)
-while ! xdpyinfo &>/dev/null; do
-  echo "Ожидание X сервера..."
-  sleep 1
-done
+# Ждем X сервер
+while ! xdpyinfo &>/dev/null; do sleep 1; done
 
 # Очистка сессий
 rm -rf ~/.config/$CONFIG_DIR/Singleton*
 
 # Запуск браузера
 while true; do
-  $BROWSER_CMD \
-    --no-first-run \
-    --disable \
-    --kiosk \
-    --incognito \
-    "$KIOSK_URL"
+  $BROWSER_CMD --no-first-run --kiosk --incognito "$KIOSK_URL"
   sleep 2
 done
 EOF
 chmod +x "$KIOSK_SCRIPT"
 chown $KIOSK_USER:$KIOSK_USER "$KIOSK_SCRIPT"
 
-# === НАСТРОЙКА .xinitrc (ИСПРАВЛЕННАЯ) ===
+# Исправленный .xinitrc
 cat > "/home/$KIOSK_USER/.xinitrc" <<EOF
 #!/bin/bash
-
-# Настройки ДО запуска оконного менеджера
-xset -dpms
-xset s off
-xset s noblank
-
-# Запускаем Openbox В ФОНЕ (без exec!)
+xset -dpms; xset s off; xset s noblank
 openbox-session &
-
-# Даем Openbox 2 секунды на инициализацию
 sleep 2
-
-# ТЕПЕРЬ запускаем Chrome (exec заменяет процесс)
 exec $KIOSK_SCRIPT
 EOF
 chmod +x "/home/$KIOSK_USER/.xinitrc"
 chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
 
-# === НАДЕЖНЫЙ АВТОЛОГИН ЧЕРЕЗ SYSTEMD ===
-log "Создание надежного systemd-сервиса..."
+# Надежный автологин через .profile
+PROFILE_FILE="/home/$KIOSK_USER/.profile"
+if ! grep -q "CHROME_KIOSK" "$PROFILE_FILE"; then
+  cat >> "$PROFILE_FILE" <<EOF
 
-# Отключаем стандартный getty на TTY1
-systemctl disable getty@tty1.service
-systemctl mask getty@tty1.service
+# CHROME_KIOSK - Автозапуск
+if [ "\$(tty)" = "/dev/tty1" ]; then
+  startx >> /home/$KIOSK_USER/xorg.log 2>&1
+fi
+EOF
+  chown $KIOSK_USER:$KIOSK_USER "$PROFILE_FILE"
+fi
 
-# Создаем собственный сервис киоска
+# Systemd service как резерв
 cat > /etc/systemd/system/kiosk.service <<EOF
 [Unit]
 Description=Chrome Kiosk
@@ -136,14 +195,15 @@ EOF
 systemctl daemon-reload
 systemctl enable kiosk.service
 
-# === ФИНАЛ ===
-log "✅ Готово!"
-log "После перезагрузки Chrome запустится автоматически"
-log "Логи: /home/$KIOSK_USER/kiosk-*.log"
-log "Для отладки: sudo journalctl -u kiosk -f"
+log "✅ Установка завершена!"
+log "Браузер: $BROWSER_CMD"
+log "Команда для запуска: $BROWSER_CMD"
+log "Логи будут в /home/$KIOSK_USER/kiosk.log"
 
 if [ "$REBOOT_AFTER" = true ]; then
   log "Перезагрузка..."
   sleep 3
   reboot
+else
+  log "Перезагрузитесь вручную: sudo reboot"
 fi
