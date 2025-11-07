@@ -125,18 +125,18 @@ fi
 # === ЭТАП 6: Скрипт киоска (адаптивный) ===
 step "Создание скрипта автозапуска..."
 KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
-cat > "$KIOSK_SCRIPT" <<'EOF'
+cat > "$KIOSK_SCRIPT" <<EOF
 #!/bin/bash
 
-LOGFILE="/home/$USER/kiosk-$(date +%Y%m%d-%H%M%S).log"
-exec > "$LOGFILE" 2>&1
-echo "=== Запуск Kiosk: $(date) ==="
-echo "Среда: $(systemd-detect-virt 2>/dev/null || echo 'physical')"
+LOGFILE="/home/\\$USER/kiosk-\\$(date +%Y%m%d-%H%M%S).log"
+exec > "\$LOGFILE" 2>&1
+echo "=== Запуск Kiosk: \\$(date) ==="
+echo "Среда: \\$(systemd-detect-virt 2>/dev/null || echo 'physical')"
 
 # Ожидание X сервера
 for i in {1..30}; do
   if xdpyinfo &>/dev/null; then break; fi
-  echo "Ожидание X сервера... $i/30"
+  echo "Ожидание X сервера... \\\$i/30"
   sleep 1
 done
 
@@ -150,13 +150,13 @@ CHROME_FLAGS="--no-first-run --disable --kiosk --incognito --disable-translate -
 # Добавляем VM-флаги только если это VM
 if systemd-detect-virt --quiet --vm 2>/dev/null; then
   echo "Обнаружена VM, добавляю флаги..."
-  CHROME_FLAGS="$CHROME_FLAGS --disable-gpu --no-sandbox --disable-dev-shm-usage"
+  CHROME_FLAGS="\\$CHROME_FLAGS --disable-gpu --no-sandbox --disable-dev-shm-usage"
 fi
 
 # Запуск Chrome в цикле
 while true; do
-  echo "Запуск Chrome: $CHROME_FLAGS"
-  google-chrome-stable $CHROME_FLAGS "$KIOSK_URL"
+  echo "Запуск Chrome: \\$CHROME_FLAGS"
+  google-chrome-stable \\$CHROME_FLAGS "$KIOSK_URL"
   echo "⚠️ Chrome закрыт! Перезапуск..."
   sleep 2
 done
@@ -167,11 +167,11 @@ chown $KIOSK_USER:$KIOSK_USER "$KIOSK_SCRIPT"
 
 # === ЭТАП 7: .xinitrc ===
 step "Настройка X-сессии..."
-cat > "/home/$KIOSK_USER/.xinitrc" <<'EOF'
+cat > "/home/$KIOSK_USER/.xinitrc" <<EOF
 #!/bin/bash
 openbox-session &
 sleep 2
-exec /home/$USER/kiosk.sh
+exec /home/\\$USER/kiosk.sh
 EOF
 chmod +x "/home/$KIOSK_USER/.xinitrc"
 chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
@@ -180,7 +180,7 @@ chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
 step "Настройка автологина..."
 cat > /etc/systemd/system/kiosk.service <<EOF
 [Unit]
-Description=Chrome Kiosk (\L$ENV_TYPE\E)
+Description=Chrome Kiosk (\\$ENV_TYPE)
 After=network.target
 
 [Service]
