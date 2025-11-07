@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ==========================================
-# Debian Chrome Kiosk - ТОЛЬКО GOOGLE CHROME
-# Полностью рабочая версия с логированием
-# Поддержка VirtualBox и VMware
+# Debian Chrome Kiosk - ОПТИМИЗИРОВАННЫЙ ДЛЯ VIRTUALBOX
+# Упрощенная графическая настройка для VirtualBox
 # ==========================================
 
 set -e
@@ -26,79 +25,31 @@ log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[0;33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; exit 1; }
 
-# Функция определения среды
-detect_environment() {
-    if systemd-detect-virt --quiet --vm 2>/dev/null; then
-        local vm_type=$(systemd-detect-virt 2>/dev/null)
-        case "$vm_type" in
-            vmware) echo "vmware" ;;
-            oracle) echo "virtualbox" ;;
-            kvm) echo "kvm" ;;
-            *) echo "other-vm" ;;
-        esac
-    else
-        echo "physical"
-    fi
-}
+log "Начало установки Google Chrome Kiosk для VirtualBox..."
 
-# Парсинг аргументов
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    -u|--user) KIOSK_USER="$2"; shift 2 ;;
-    -url|--url) KIOSK_URL="$2"; shift 2 ;;
-    -r|--reboot) REBOOT_AFTER=true; shift ;;
-    -k|--keyboard) KEYBOARD_LAYOUT="$2"; shift 2 ;;
-    -h|--help) 
-      echo "Использование: $0 [опции]"
-      echo "  -u, --user USER      Имя пользователя (по умолчанию: kiosk)"
-      echo "  -url, --url URL      Стартовый URL (по умолчанию: https://www.google.com)"
-      echo "  -k, --keyboard LAYOUT Раскладка (по умолчанию: us)"
-      echo "  -r, --reboot         Автоматическая перезагрузка"
-      echo "  -h, --help           Справка"
-      exit 0 ;;
-    *) error "Неизвестный параметр: $1" ;;
-  esac
-done
-
-# Определяем среду
-ENV_TYPE=$(detect_environment)
-log "Обнаружена среда: $ENV_TYPE"
-
-log "Начало установки Google Chrome Kiosk для $KIOSK_USER..."
-
-# === ЭТАП 1: Установка X11 ===
+# === ЭТАП 1: Установка базовых пакетов ===
 log "Установка X11 и зависимостей..."
 apt update && apt install -y --no-install-recommends \
-  xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all \
-  xinit openbox dbus-x11 x11-xserver-utils xfonts-base \
-  wget curl ca-certificates locales
+  xserver-xorg xinit openbox lightdm \
+  dbus-x11 x11-xserver-utils xfonts-base \
+  wget curl ca-certificates locales \
+  alsa-utils pulseaudio
 
-# === ЭТАП 2: Установка VM-специфичных пакетов ===
-case "$ENV_TYPE" in
-    vmware)
-        log "Установка VMWare Tools..."
-        apt install -y --no-install-recommends open-vm-tools open-vm-tools-desktop
-        ;;
-    virtualbox)
-        log "Установка VirtualBox Guest Additions..."
-        # Устанавливаем зависимости для сборки
-        apt install -y --no-install-recommends \
-          linux-headers-amd64 \
-          build-essential \
-          dkms \
-          xserver-xorg-video-qxl
-        
-        # Пробуем найти доступные пакеты VirtualBox
-        if apt-cache show virtualbox-guest-utils > /dev/null 2>&1; then
-            apt install -y --no-install-recommends virtualbox-guest-utils
-        elif apt-cache show virtualbox-guest-x11 > /dev/null 2>&1; then
-            apt install -y --no-install-recommends virtualbox-guest-x11
-        else
-            warn "Пакеты VirtualBox Guest Utils не найдены в репозиториях"
-            warn "Установите Guest Additions вручную из меню VirtualBox"
-        fi
-        ;;
-esac
+# === ЭТАП 2: Минимальная установка VirtualBox пакетов ===
+log "Установка VirtualBox Guest Utils..."
+apt install -y --no-install-recommends \
+  linux-headers-amd64 \
+  build-essential \
+  dkms
+
+# Пробуем найти пакеты VirtualBox
+if apt-cache show virtualbox-guest-utils > /dev/null 2>&1; then
+    apt install -y --no-install-recommends virtualbox-guest-utils
+elif apt-cache show virtualbox-guest-x11 > /dev/null 2>&1; then
+    apt install -y --no-install-recommends virtualbox-guest-x11
+else
+    warn "Пакеты VirtualBox не найдены, используем базовый Xorg"
+fi
 
 # === ЭТАП 3: Установка Google Chrome ===
 if ! command -v google-chrome-stable &> /dev/null; then
@@ -113,77 +64,82 @@ fi
 # === ЭТАП 4: Создание пользователя ===
 if ! id "$KIOSK_USER" &>/dev/null; then
   log "Создание пользователя $KIOSK_USER..."
-  useradd -m -s /bin/bash -G audio,video,cdrom "$KIOSK_USER"
+  useradd -m -s /bin/bash -G audio,video $KIOSK_USER
   echo "$KIOSK_USER:kiosk123" | chpasswd
   log "✓ Пользователь создан (пароль: kiosk123)"
 else
   log "Пользователь $KIOSK_USER уже существует"
 fi
 
-# === ЭТАП 5: Скрипт автозапуска Chrome (адаптивный для VM) ===
+# === ЭТАП 5: Создание УПРОЩЕННОГО скрипта киоска ===
 KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
-log "Создание скрипта киоска..."
+log "Создание упрощенного скрипта киоска..."
 
-cat > "$KIOSK_SCRIPT" <<EOF
+cat > "$KIOSK_SCRIPT" <<'EOF'
 #!/bin/bash
 
-# ЛОГИРОВАНИЕ ВСЕХ ОШИБОК
-LOGFILE="/home/\$USER/kiosk-\$(date +%Y%m%d-%H%M%S).log"
-exec > "\$LOGFILE" 2>&1
-echo "=== Запуск Kiosk: \$(date) ==="
-echo "Среда: $ENV_TYPE"
-echo "Пользователь: \$USER"
-echo "DISPLAY: \$DISPLAY"
+# Логирование
+exec > "/home/$USER/kiosk.log" 2>&1
+echo "=== Запуск Kiosk: $(date) ==="
 
-# Проверяем доступность X сервера
-echo "Проверка X сервера..."
-for i in {1..30}; do
-    if xdpyinfo >/dev/null 2>&1; then
-        echo "✓ X сервер готов на попытке \$i"
-        break
-    fi
-    echo "Ожидание X сервера... \$i/30"
+# Ждем запуска X сервера
+echo "Ожидание X сервера..."
+while [ -z "$(ps aux | grep Xorg | grep -v grep)" ]; do
     sleep 1
 done
 
-# Проверяем окончательно
+# Дополнительная пауза для инициализации
+sleep 3
+
+# Проверяем X сервер
 if ! xdpyinfo >/dev/null 2>&1; then
-    echo "❌ X сервер не доступен после 30 секунд ожидания"
+    echo "ОШИБКА: X сервер не доступен"
     exit 1
 fi
 
-# Настройки энергосбережения
-echo "Настройка энергосбережения..."
+echo "X сервер запущен успешно"
+
+# Отключаем энергосбережение
 xset -dpms
 xset s off
 xset s noblank
 
-# Очистка старых сессий
-echo "Очистка старых сессий Chrome..."
+# Очищаем сессии Chrome
 rm -rf ~/.config/google-chrome/Singleton*
 
-# Установка раскладки
-echo "Установка раскладки: $KEYBOARD_LAYOUT"
-setxkbmap $KEYBOARD_LAYOUT
+# Устанавливаем раскладку
+setxkbmap us
 
-# Базовые флаги Chrome
-CHROME_FLAGS="--no-first-run --disable --disable-translate --disable-infobars --disable-suggestions-service --disable-save-password-bubble --disable-sync --no-default-browser-check --disable-web-security --incognito --kiosk --start-maximized"
+# Флаги Chrome для VirtualBox
+CHROME_FLAGS="
+--no-first-run
+--disable
+--disable-translate
+--disable-infobars
+--disable-suggestions-service
+--disable-save-password-bubble
+--disable-sync
+--no-default-browser-check
+--disable-web-security
+--incognito
+--kiosk
+--start-maximized
+--disable-gpu
+--no-sandbox
+--disable-dev-shm-usage
+--disable-software-rasterizer
+--disable-features=VizDisplayCompositor
+--use-gl=swiftshader
+--ignore-gpu-blocklist
+"
 
-# Добавляем VM-специфичные флаги
-if [ "$ENV_TYPE" != "physical" ]; then
-    echo "VM-среда: добавляю оптимизации..."
-    CHROME_FLAGS="\$CHROME_FLAGS --disable-gpu --no-sandbox --disable-dev-shm-usage"
-fi
+echo "Запуск Chrome..."
+echo "Флаги: $CHROME_FLAGS"
 
-# Запуск Chrome в бесконечном цикле
-echo "Запуск Chrome с флагами: \$CHROME_FLAGS"
-echo "URL: $KIOSK_URL"
-
+# Запускаем Chrome
 while true; do
-    echo "=== Запуск Chrome: \$(date) ==="
-    google-chrome-stable \$CHROME_FLAGS "$KIOSK_URL"
-    EXIT_CODE=\$?
-    echo "Chrome закрыт с кодом: \$EXIT_CODE. Перезапуск через 3 секунды..."
+    google-chrome-stable $CHROME_FLAGS "https://www.google.com"
+    echo "Chrome перезапуск через 3 секунды..."
     sleep 3
 done
 EOF
@@ -191,167 +147,166 @@ EOF
 chmod +x "$KIOSK_SCRIPT"
 chown $KIOSK_USER:$KIOSK_USER "$KIOSK_SCRIPT"
 
-# === ЭТАП 6: Настройка X-сессии ===
-cat > "/home/$KIOSK_USER/.xinitrc" <<'EOF'
+# === ЭТАП 6: Настройка LightDM (автологин) ===
+log "Настройка LightDM для автоматического входа..."
+
+# Устанавливаем lightdm если не установлен
+if ! command -v lightdm >/dev/null 2>&1; then
+    apt install -y lightdm
+fi
+
+# Настраиваем автоматический логин
+cat > /etc/lightdm/lightdm.conf <<EOF
+[Seat:*]
+autologin-user=$KIOSK_USER
+autologin-user-timeout=0
+user-session=openbox
+session-setup-script=/bin/bash -c 'sleep 1; startx &'
+EOF
+
+# Создаем сессию Openbox для LightDM
+mkdir -p /home/$KIOSK_USER/.config/openbox
+cat > /home/$KIOSK_USER/.config/openbox/autostart <<'EOF'
 #!/bin/bash
+# Ждем инициализации
+sleep 2
 
-# Логирование запуска X
-echo "=== Запуск X session: $(date) ===" > /home/$USER/xsession.log
-
-# Экспортируем переменные
-export DISPLAY=:0
-export XAUTHORITY=/home/$USER/.Xauthority
-
-# Запускаем Openbox в фоне
-echo "Запуск Openbox..." >> /home/$USER/xsession.log
-openbox-session 2>> /home/$USER/xsession.log &
-
-# Даем Openbox время на запуск
-echo "Ожидание Openbox..." >> /home/$USER/xsession.log
-sleep 3
-
-# Проверяем запущенные процессы
-echo "Запущенные процессы:" >> /home/$USER/xsession.log
-ps aux >> /home/$USER/xsession.log
-
-# Запускаем киоск-скрипт
-echo "Запуск kiosk.sh..." >> /home/$USER/xsession.log
+# Запускаем скрипт киоска
 exec /home/$USER/kiosk.sh
 EOF
 
-chmod +x "/home/$KIOSK_USER/.xinitrc"
-chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
+chmod +x /home/$KIOSK_USER/.config/openbox/autostart
+chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 
-# === ЭТАП 7: ПРАВИЛЬНЫЙ АВТОЛОГИН ЧЕРЕЗ SYSTEMD ===
-log "Настройка автологина через systemd..."
+# === ЭТАП 7: Создание службы для надежного запуска ===
+log "Создание службы для киоска..."
 
-# Отключаем стандартный getty на tty1
-systemctl disable getty@tty1.service 2>/dev/null || true
-systemctl mask getty@tty1.service 2>/dev/null || true
-
-# Создаем правильный сервис для автологина
 cat > /etc/systemd/system/kiosk.service <<EOF
 [Unit]
-Description=Chrome Kiosk ($ENV_TYPE)
-After=systemd-user-sessions.service plymouth-quit-wait.service
-Before=getty.target
+Description=Chrome Kiosk for VirtualBox
+After=lightdm.service
 
 [Service]
 User=$KIOSK_USER
 Group=$KIOSK_USER
-WorkingDirectory=/home/$KIOSK_USER
-ExecStartPre=/bin/sleep 3
-ExecStart=/usr/bin/startx /home/$KIOSK_USER/.xinitrc -- :0 -novtswitch -keeptty -verbose 3
+Type=simple
+ExecStart=/home/$KIOSK_USER/kiosk.sh
 Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
+RestartSec=5
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/$KIOSK_USER/.Xauthority
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target
 EOF
 
-# Включаем сервис
 systemctl daemon-reload
 systemctl enable kiosk.service
 
-# === ЭТАП 8: Настройка автоматического логина в getty ===
-log "Настройка автоматического логина..."
+# === ЭТАП 8: Настройка Xorg для VirtualBox ===
+log "Создание конфигурации Xorg для VirtualBox..."
 
-# Создаем конфигурацию для автоматического логина
-mkdir -p /etc/systemd/system/getty@tty1.service.d
+mkdir -p /etc/X11/xorg.conf.d
 
-cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
+# Простая конфигурация Xorg
+cat > /etc/X11/xorg.conf.d/10-vbox.conf <<'EOF'
+Section "Device"
+    Identifier "VirtualBox Graphics"
+    Driver "modesetting"
+    Option "AccelMethod" "none"
+EndSection
+
+Section "Monitor"
+    Identifier "VirtualBox Monitor"
+    HorizSync 1.0 - 100.0
+    VertRefresh 1.0 - 100.0
+EndSection
+
+Section "Screen"
+    Identifier "Default Screen"
+    Monitor "VirtualBox Monitor"
+    Device "VirtualBox Graphics"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1024x768" "800x600" "640x480"
+    EndSubSection
+EndSection
+
+Section "ServerFlags"
+    Option "DontZap" "on"
+    Option "DontVTSwitch" "on"
+EndSection
+EOF
+
+# === ЭТАП 9: Настройка разрешения ===
+log "Настройка автоматического разрешения..."
+
+# Создаем скрипт для автоматического разрешения
+cat > /usr/local/bin/set-vbox-resolution <<'EOF'
+#!/bin/bash
+# Ждем запуска X
+sleep 5
+
+# Пробуем установить разрешение
+for res in "1024x768" "800x600" "1280x720" "1366x768"; do
+    if xrandr | grep -q "$res"; then
+        xrandr -s "$res"
+        echo "Установлено разрешение: $res"
+        break
+    fi
+done
+EOF
+
+chmod +x /usr/local/bin/set-vbox-resolution
+
+# Добавляем в автозагрузку
+cat > /home/$KIOSK_USER/.xprofile <<'EOF'
+#!/bin/bash
+/usr/local/bin/set-vbox-resolution &
+EOF
+
+chmod +x /home/$KIOSK_USER/.xprofile
+chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.xprofile
+
+# === ЭТАП 10: ФИНАЛЬНАЯ НАСТРОЙКА ===
+log "Финальная настройка..."
+
+# Разрешаем автоматический логин
+mkdir -p /etc/systemd/system/lightdm.service.d
+cat > /etc/systemd/system/lightdm.service.d/override.conf <<EOF
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin $KIOSK_USER --noclear %I \$TERM
+ExecStart=/usr/sbin/lightdm --log-dir=/var/log/lightdm --run-dir=/run/lightdm
+Restart=always
 EOF
 
-# === ЭТАП 9: Дополнительная настройка для VirtualBox ===
-if [ "$ENV_TYPE" = "virtualbox" ]; then
-    log "Дополнительная настройка для VirtualBox..."
-    
-    # Создаем простой скрипт для автоматического разрешения
-    cat > /home/$KIOSK_USER/.xprofile <<'EOF'
-#!/bin/bash
-# Автоматическое определение разрешения в VirtualBox
-echo "Запуск .xprofile: $(date)" >> /home/$USER/xprofile.log
-if command -v xrandr > /dev/null; then
-    echo "Настройка разрешения через xrandr..." >> /home/$USER/xprofile.log
-    sleep 5
-    xrandr --auto
-    echo "Разрешение установлено: $(xrandr | grep '*')" >> /home/$USER/xprofile.log
-fi
-EOF
-    chmod +x /home/$KIOSK_USER/.xprofile
-    chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.xprofile
-fi
+# Включаем LightDM
+systemctl enable lightdm
 
-# === ЭТАП 10: Создание диагностического скрипта ===
-log "Создание диагностического скрипта..."
-
-cat > /home/$KIOSK_USER/diagnose.sh <<'EOF'
-#!/bin/bash
-echo "=== ДИАГНОСТИКА KIOSK ==="
-echo "Время: $(date)"
-echo "Пользователь: $USER"
-echo "DISPLAY: $DISPLAY"
-echo ""
-echo "=== Процессы ==="
-ps aux | grep -E "(Xorg|xinit|openbox|chrome)" | grep -v grep
-echo ""
-echo "=== X сервер ==="
-if xdpyinfo >/dev/null 2>&1; then
-    echo "✓ X сервер работает"
-    xdpyinfo | grep dimensions
-else
-    echo "✗ X сервер не доступен"
-fi
-echo ""
-echo "=== Логи ==="
-echo "Последние логи kiosk:"
-tail -n 10 /home/$USER/kiosk-*.log 2>/dev/null || echo "Логи kiosk не найдены"
-echo ""
-echo "Логи X session:"
-tail -n 10 /home/$USER/xsession.log 2>/dev/null || echo "Логи X session не найдены"
-echo ""
-echo "Systemd статус:"
-systemctl status kiosk.service --no-pager -l
-EOF
-
-chmod +x /home/$KIOSK_USER/diagnose.sh
-chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/diagnose.sh
-
-# === ЭТАП 11: ФИНАЛ ===
+# === ЭТАП 11: ИНФОРМАЦИЯ ===
 log "✅ Установка завершена!"
-log "✅ Среда: $ENV_TYPE"
-log "✅ VM-оптимизации: $([ "$ENV_TYPE" != "physical" ] && echo "ВКЛ" || echo "ВЫКЛ")"
+log ""
+log "🔧 КОНФИГУРАЦИЯ VIRTUALBOX:"
+log "   • Видеопамять: 128 МБ минимум"
+log "   • Включите 3D-ускорение в настройках VM"
+log "   • Разрешение: установите минимум 1024x768"
 log ""
 log "📋 ДЛЯ ДИАГНОСТИКИ:"
-log "   • После перезагрузки зайдите как root (Ctrl+Alt+F2)"
-log "   • Выполните: sudo -u $KIOSK_USER /home/$KIOSK_USER/diagnose.sh"
-log "   • Проверьте логи: tail -f /home/$KIOSK_USER/kiosk-*.log"
-log "   • Логи X: tail -f /home/$KIOSK_USER/xsession.log"
-log "   • Systemd: journalctl -u kiosk.service -f"
+log "   • Логи киоска: tail -f /home/$KIOSK_USER/kiosk.log"
+log "   • Логи LightDM: journalctl -u lightdm -f"
+log "   • Логи Xorg: cat /var/log/Xorg.0.log"
 log ""
-log "🔧 ЕСЛИ НЕ РАБОТАЕТ:"
-log "   • Попробуйте запустить вручную:"
-log "     sudo -u $KIOSK_USER startx /home/$KIOSK_USER/.xinitrc"
-
-if [ "$ENV_TYPE" = "virtualbox" ]; then
-    log ""
-    log "🔧 ДЛЯ VIRTUALBOX:"
-    log "   • Убедитесь, что установлены Guest Additions"
-    log "   • В настройках VM включите 3D-ускорение"
-fi
+log "🔄 ПЕРЕЗАГРУЗКА:"
 
 if [ "$REBOOT_AFTER" = true ]; then
-  log "🔄 Перезагрузка через 5 секунд..."
+  log "Перезагрузка через 5 секунд..."
   sleep 5
   reboot
 else
-  log "⚠️  НУЖНА ПЕРЕЗАГРУЗКА!"
   log "Выполните: sudo reboot"
 fi
+
+echo ""
+warn "После перезагрузки система автоматически зайдет под пользователем $KIOSK_USER"
+warn "и запустит Chrome в режиме киоска"
