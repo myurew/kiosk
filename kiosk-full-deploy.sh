@@ -80,8 +80,23 @@ case "$ENV_TYPE" in
         apt install -y --no-install-recommends open-vm-tools open-vm-tools-desktop
         ;;
     virtualbox)
-        log "Установка VirtualBox Guest Utils..."
-        apt install -y --no-install-recommends virtualbox-guest-utils virtualbox-guest-x11
+        log "Установка VirtualBox Guest Additions..."
+        # Устанавливаем зависимости для сборки
+        apt install -y --no-install-recommends \
+          linux-headers-amd64 \
+          build-essential \
+          dkms \
+          xserver-xorg-video-qxl
+        
+        # Пробуем найти доступные пакеты VirtualBox
+        if apt-cache show virtualbox-guest-utils > /dev/null 2>&1; then
+            apt install -y --no-install-recommends virtualbox-guest-utils
+        elif apt-cache show virtualbox-guest-x11 > /dev/null 2>&1; then
+            apt install -y --no-install-recommends virtualbox-guest-x11
+        else
+            warn "Пакеты VirtualBox Guest Utils не найдены в репозиториях"
+            warn "Установите Guest Additions вручную из меню VirtualBox"
+        fi
         ;;
 esac
 
@@ -211,17 +226,17 @@ systemctl enable kiosk.service
 if [ "$ENV_TYPE" = "virtualbox" ]; then
     log "Дополнительная настройка для VirtualBox..."
     
-    # Включаем автоматическое разрешение экрана для VirtualBox
-    cat > /etc/X11/Xsession.d/99vbox <<'EOF'
+    # Создаем простой скрипт для автоматического разрешения
+    cat > /home/$KIOSK_USER/.xprofile <<'EOF'
 #!/bin/bash
 # Автоматическое определение разрешения в VirtualBox
-if [ -x /usr/bin/VBoxClient ]; then
-    /usr/bin/VBoxClient --display
-    /usr/bin/VBoxClient --clipboard
-    /usr/bin/VBoxClient --draganddrop
+if command -v xrandr > /dev/null; then
+    # Устанавливаем максимальное доступное разрешение
+    xrandr --auto
 fi
 EOF
-    chmod +x /etc/X11/Xsession.d/99vbox
+    chmod +x /home/$KIOSK_USER/.xprofile
+    chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.xprofile
 fi
 
 # === ЭТАП 9: ФИНАЛ ===
@@ -235,6 +250,13 @@ log "📋 ВАЖНО:"
 log "   • Проверьте логи: tail -f /home/$KIOSK_USER/kiosk-*.log"
 log "   • Отладка: sudo journalctl -u kiosk -f"
 log "   • Для выхода: Ctrl+Alt+F2 (TTY2), затем в TTY1: Ctrl+C"
+
+if [ "$ENV_TYPE" = "virtualbox" ]; then
+    log ""
+    log "🔧 ДЛЯ VIRTUALBOX:"
+    log "   • Если нет автоматического разрешения, установите Guest Additions вручную"
+    log "   • В меню VirtualBox: Устройства -> Установить дополнения гостевой ОС"
+fi
 
 if [ "$REBOOT_AFTER" = true ]; then
   log "🔄 Перезагрузка через 5 секунд..."
