@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 2.0 - Normal browser with controls
+# Version 3.0 - Fullscreen launcher + normal browser windows
 
 set -e  # Exit on any error
 
@@ -214,7 +214,7 @@ cat > $HTML_LAUNCHER << 'EOF'
                     console.log('App launched successfully:', command);
                     showStatus('Приложение запущено: ' + getAppName(command));
                     
-                    // For browser, we'll let it open normally and monitor when it closes
+                    // Start monitoring for browser
                     if (command === 'firefox') {
                         startBrowserMonitoring();
                     }
@@ -265,12 +265,23 @@ cat > $HTML_LAUNCHER << 'EOF'
             return false;
         });
         
-        // Prevent most keyboard shortcuts
+        // Prevent most keyboard shortcuts but allow F11 for fullscreen
         document.addEventListener('keydown', function(e) {
-            // Allow only F11 for fullscreen
-            if (e.keyCode !== 122) { // F11
+            if (e.keyCode !== 122) { // Allow only F11
                 e.preventDefault();
                 return false;
+            }
+        });
+        
+        // Auto-fullscreen for launcher
+        document.addEventListener('DOMContentLoaded', function() {
+            // Try to enter fullscreen
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen();
+            } else if (document.documentElement.webkitRequestFullscreen) {
+                document.documentElement.webkitRequestFullscreen();
+            } else if (document.documentElement.msRequestFullscreen) {
+                document.documentElement.msRequestFullscreen();
             }
         });
     </script>
@@ -300,9 +311,6 @@ ALLOWED_APPS = {
     'gnome-terminal': 'gnome-terminal',
     'mousepad': 'mousepad'
 }
-
-# Track launched processes
-launched_processes = {}
 
 def is_process_running(process_name):
     """Check if a process is running using pgrep"""
@@ -336,19 +344,21 @@ def launch_app():
             logging.error(f"Application not found: {command}")
             return f'ERROR: Application {app_name} not installed', 404
         
-        # Launch application in background
-        # For Firefox, don't use --kiosk mode, let it open normally
+        # For Firefox, launch in new window with normal interface
         if command == 'firefox-esr':
-            process = subprocess.Popen([command], 
-                                    stdout=subprocess.DEVNULL, 
-                                    stderr=subprocess.DEVNULL)
+            # Launch Firefox with new window and normal interface
+            process = subprocess.Popen([
+                command,
+                '--new-window',
+                'about:blank'
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
+            # For other apps, launch normally
             process = subprocess.Popen([command], 
                                     stdout=subprocess.DEVNULL, 
                                     stderr=subprocess.DEVNULL,
                                     preexec_fn=os.setpgrp)
         
-        launched_processes[app_name] = process
         logging.info(f"Successfully launched: {command}")
         return 'OK'
         
@@ -368,9 +378,6 @@ def app_status():
     if is_process_running(command):
         return 'RUNNING'
     else:
-        # Clean up process tracking if not running
-        if app_name in launched_processes:
-            del launched_processes[app_name]
         return 'NOT_RUNNING'
 
 @app.route('/health')
@@ -406,11 +413,11 @@ python3 /home/kiosk/kiosk/kiosk_server.py &
 # Wait for server to start
 sleep 3
 
-# Launch Firefox in normal mode (not kiosk) to show launcher
-firefox-esr http://localhost:8080 &
+# Launch Firefox in fullscreen kiosk mode for launcher
+firefox-esr --kiosk http://localhost:8080 &
 
-# Hide cursor (optional)
-# unclutter -idle 1 &
+# Hide cursor
+unclutter -idle 1 &
 
 # Prevent screen blanking
 xset s off
@@ -423,6 +430,10 @@ EOF
 
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 chmod +x $OPENBOX_AUTOSTART
+
+# Install unclutter for hiding cursor
+print_status "Installing unclutter for cursor hiding..."
+apt install -y unclutter
 
 # Configure LightDM for auto-login
 print_status "Configuring LightDM for auto-login..."
@@ -460,16 +471,16 @@ echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
 echo -e "${YELLOW}How it works now:${NC}"
-echo "✅ Лаунчер запускается в браузере в обычном режиме"
-echo "✅ При нажатии 'Браузер' открывается новое окно Firefox"
-echo "✅ В новом окне доступны: адресная строка, вкладки, кнопки Назад/Вперед"
-echo "✅ При закрытии браузера автоматически возвращаемся к лаунчеру"
-echo "✅ Все приложения запускаются в отдельных окнах"
+echo "✅ Лаунчер запускается в полноэкранном режиме (киоск-режим)"
+echo "✅ При нажатии 'Браузер' открывается НОВОЕ окно Firefox"
+echo "✅ Новое окно имеет нормальный интерфейс: вкладки, адресная строка, кнопки"
+echo "✅ Лаунчер остается открытым в фоне в полноэкранном режиме"
+echo "✅ При закрытии браузера можно снова использовать лаунчер"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
-echo "2. The kiosk will start automatically with launcher"
+echo "2. System starts with fullscreen launcher"
 echo "3. Click 'Browser' to open normal Firefox window"
-echo "4. Close Firefox to return to launcher"
+echo "4. Close Firefox to return to fullscreen launcher"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
