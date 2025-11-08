@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 1.0
+# Version 1.1 - Updated apps: removed Office, Calculator; added Terminal
 
 set -e  # Exit on any error
 
@@ -155,19 +155,19 @@ cat > $HTML_LAUNCHER << 'EOF'
             <div class="icon-text">Браузер</div>
         </div>
         
-        <div class="icon" onclick="launchApp('libreoffice')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM4IDQySDEwYTIgMiAwIDAgMS0yLTJWOGEyIDIgMCAwIDEgMi0yaDI4YTIgMiAwIDAgMSAyIDJ2MzJhMiAyIDAgMCAxLTIgMnoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMzUgMzZIMTMuMDFjLS41NiAwLTEuMDEtLjQ1LTEuMDEtMS4wMVYxMy4wMWMwLS41Ni40NS0xLjAxIDEuMDEtMS4wMUgzNWMuNTYgMCAxLjAxLjQ1IDEuMDEgMS4wMVYzNC45OWMwIC41Ni0uNDUgMS4wMS0xLjAxIDEuMDF6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE2IDE2aDE2djE2SDE2eiIvPjxwYXRoIGZpbGw9IiMzMzMiIGQ9Ik0yNCAyNGw2IDZIMTh6Ii8+PC9zdmc+" alt="Office">
-            <div class="icon-text">Офис</div>
-        </div>
-        
         <div class="icon" onclick="launchApp('thunar')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMTRIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyIDAtLjMzLjEzLS42NS4zNS0uODhMOS4xNCAyOS4yN2MtLjQ4LjQ4LS40OCAxLjI2IDAgMS43NC4yNC4yNC41NS4zNi44Ny4zNi4zMiAwIC42My0uMTIuODctLjM2TDE4LjIzIDIwaDIwLjI3YzEuMzggMCAyLjUtMS4xMiAyLjUtMi41di0xYzAtMS4zOC0xLjEyLTIuNS0yLjUtMi41eiIvPjwvc3ZnPg==" alt="Files">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMTRIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyAwLS4zMy4xMy0uNjUuMzUtLjg4TDkuMTQgMjkuMjdjLS40OC40OC0uNDggMS4yNiAwIDEuNzQuMjQuMjQuNTUuMzYuODcuMzYuMzIgMCAuNjMtLjEyLjg3LS4zNkwxOC4yMyAyMGgyMC4yN2MxLjM4IDAgMi41LTEuMTIgMi41LTIuNXYtMWMwLTEuMzgtMS4xMi0yLjUtMi41LTIuNXoiLz48L3N2Zz4=" alt="Files">
             <div class="icon-text">Файлы</div>
         </div>
         
-        <div class="icon" onclick="launchApp('gnome-calculator')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM4IDQySDEwYTIgMiAwIDAgMS0yLTJWOGEyIDIgMCAwIDEgMi0yaDI4YTIgMiAwIDAgMSAyIDJ2MzJhMiAyIDAgMCAxLTIgMnoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMzUgMzZIMTMuMDFjLS41NiAwLTEuMDEtLjQ1LTEuMDEtMS4wMVYxMy4wMWMwLS41Ni40NS0xLjAxIDEuMDEtMS4wMUgzNWMuNTYgMCAxLjAxLjQ1IDEuMDEgMS4wMVYzNC45OWMwIC41Ni0uNDUgMS4wMS0xLjAxIDEuMDF6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTgiIHk9IjI2IiBmb250LXNpemU9IjE0Ij43ODk8L3RleHQ+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMjQiIHk9IjMyIiBmb250LXNpemU9IjE0Ij40NTY8L3RleHQ+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTIiIHk9IjMyIiBmb250LXNpemU9IjE0Ij4xMjM8L3RleHQ+PC9zdmc+" alt="Calculator">
-            <div class="icon-text">Калькулятор</div>
+        <div class="icon" onclick="launchApp('gnome-terminal')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE2IDI0bDQgNCA0LTRoM2wtNyA3LTctN3oiLz48L3N2Zz4=" alt="Terminal">
+            <div class="icon-text">Терминал</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('mousepad')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
+            <div class="icon-text">Текстовый редактор</div>
         </div>
     </div>
 
@@ -206,6 +206,15 @@ cat > $HTML_LAUNCHER << 'EOF'
             e.preventDefault();
             return false;
         });
+        
+        // Prevent keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Allow only F11 for fullscreen and F5 for refresh
+            if (![116, 122].includes(e.keyCode)) { // F5 and F11
+                e.preventDefault();
+                return false;
+            }
+        });
     </script>
 </body>
 </html>
@@ -228,9 +237,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Allowed applications for security
 ALLOWED_APPS = {
     'firefox-esr': 'firefox-esr',
-    'libreoffice': 'libreoffice',
     'thunar': 'thunar',
-    'gnome-calculator': 'gnome-calculator',
+    'gnome-terminal': 'gnome-terminal',
     'mousepad': 'mousepad',
     'vlc': 'vlc'
 }
@@ -335,9 +343,9 @@ user-session=openbox
 session-cleanup-script=/usr/bin/pkill -u kiosk
 EOF
 
-# Install additional applications (optional)
-print_status "Installing optional applications..."
-apt install -y thunar mousepad vlc
+# Install additional applications
+print_status "Installing applications..."
+apt install -y thunar mousepad gnome-terminal
 
 # Set up permissions
 print_status "Setting up permissions..."
@@ -368,6 +376,12 @@ echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo "Openbox autostart: $OPENBOX_AUTOSTART"
+echo ""
+echo -e "${YELLOW}Installed applications:${NC}"
+echo "- Firefox ESR (Браузер)"
+echo "- Thunar (Файлы)" 
+echo "- GNOME Terminal (Терминал)"
+echo "- Mousepad (Текстовый редактор)"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
