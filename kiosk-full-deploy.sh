@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 3.4 - Browser opens on top of all windows
+# Version 3.5 - Browser opens maximized (not fullscreen)
 
 set -e  # Exit on any error
 
@@ -194,7 +194,7 @@ cat > $HTML_LAUNCHER << 'EOF'
         </div>
         
         <div class="icon" onclick="launchApp('thunar')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMTRIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyAwLS4zMy4xMy0uNjUuMzUtLjg4TDkuMTQgMjkuMjdjLS40OC40OC0uNDggMS4yNiAwIDEuNzQuMjQuMjQuNTUuMzYuODcuMzYuMzIgMCAuNjMtLjEyLjg3LS4zNkwxOC4yMyAyMGgyMC4yN2MxLjM4IDAgMi41LTEuMTIgMi41LTIuNXYtMWMwLTEuMzgtMS4xMi0yLjUtMi41LTIuNXoiLz48L3N2Zz4=" alt="Files">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMThIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyAwLS4zMy4xMy0uNjUuMzUtLjg4TDkuMTQgMjkuMjdjLS40OC40OC0uNDggMS4yNiAwIDEuNzQuMjQuMjQuNTUuMzYuODcuMzYuMzIgMCAuNjMtLjEyLjg3LS4zNkwxOC4yMyAyMGgyMC4yN2MxLjM4IDAgMi41LTEuMTIgMi41LTIuNXYtMWMwLTEuMzgtMS4xMi0yLjUtMi41LTIuNXoiLz48L3N2Zz4=" alt="Files">
             <div class="icon-text">Файлы</div>
         </div>
         
@@ -295,7 +295,7 @@ cat > $HTML_LAUNCHER << 'EOF'
 </html>
 EOF
 
-# Create Python server with browser on top
+# Create Python server with maximized browser window
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
@@ -332,20 +332,20 @@ def is_process_running(process_name):
         logging.error(f"Error checking process {process_name}: {str(e)}")
         return False
 
-def launch_browser_normal():
-    """Launch browser in completely separate process with normal window"""
+def launch_browser_maximized():
+    """Launch browser in maximized window (not fullscreen)"""
     try:
         # Use DISPLAY environment
         env = os.environ.copy()
         env['DISPLAY'] = ':0'
         
-        # Launch Firefox with new window but NO kiosk mode
+        # Launch Firefox with new window
         process = subprocess.Popen([
             'firefox-esr',
             '-new-window',
             'about:blank'
         ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-           preexec_fn=os.setsid)  # New session group
+           preexec_fn=os.setsid)
         
         logging.info("Launched Firefox in separate session")
         return process
@@ -354,12 +354,22 @@ def launch_browser_normal():
         logging.error(f"Error launching browser: {str(e)}")
         return None
 
-def ensure_browser_on_top():
-    """Ensure browser window is on top of all windows"""
+def maximize_browser_window():
+    """Maximize browser window to fit screen perfectly"""
     try:
         time.sleep(3)  # Wait for window to appear
         
-        # Multiple attempts to fix the window
+        # Get screen dimensions
+        screen_result = subprocess.run(['xdotool', 'getdisplaygeometry'], 
+                                     capture_output=True, text=True)
+        if screen_result.returncode == 0:
+            screen_width, screen_height = map(int, screen_result.stdout.strip().split())
+            logging.info(f"Screen dimensions: {screen_width}x{screen_height}")
+        else:
+            # Fallback dimensions
+            screen_width, screen_height = 1366, 768
+        
+        # Multiple attempts to maximize the window
         for attempt in range(10):
             # Get all windows
             result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True)
@@ -372,32 +382,30 @@ def ensure_browser_on_top():
             
             if firefox_windows:
                 for window_id in firefox_windows:
-                    # Remove fullscreen and maximized
+                    # Remove fullscreen mode
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
                                  capture_output=True)
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,maximized_vert,maximized_horz'], 
+                    
+                    # Maximize the window (both horizontally and vertically)
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,maximized_vert,maximized_horz'], 
                                  capture_output=True)
                     
-                    # Set specific size and position
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,50,50,1200,700'], 
+                    # Make sure it's not fullscreen
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
                                  capture_output=True)
                     
-                    # Make window always on top (above)
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,above'], 
+                    # Bring to top
+                    subprocess.run(['wmctrl', '-i', '-a', window_id], 
                                  capture_output=True)
                     
-                    # Activate and focus the window using xdotool
-                    subprocess.run(['xdotool', 'search', '--name', 'Mozilla Firefox', 'windowactivate'], 
-                                 capture_output=True)
-                    
-                    logging.info(f"Set Firefox window {window_id} on top of all windows")
+                    logging.info(f"Maximized Firefox window {window_id} to fit screen")
                 
                 break  # Success
             else:
                 time.sleep(0.5)  # Wait and try again
                 
     except Exception as e:
-        logging.error(f"Error ensuring browser on top: {str(e)}")
+        logging.error(f"Error maximizing browser window: {str(e)}")
 
 @app.route('/')
 def index():
@@ -423,11 +431,11 @@ def launch_app():
         
         # Special handling for Firefox
         if command == 'firefox-esr':
-            process = launch_browser_normal()
+            process = launch_browser_maximized()
             if process:
                 # Run window management in background
                 import threading
-                threading.Thread(target=ensure_browser_on_top).start()
+                threading.Thread(target=maximize_browser_window).start()
             else:
                 return 'ERROR: Failed to launch browser', 500
         else:
@@ -509,9 +517,9 @@ EOF
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 chmod +x $OPENBOX_AUTOSTART
 
-# Install unclutter for hiding cursor and xdotool for window control
+# Install unclutter for hiding cursor
 print_status "Installing additional tools..."
-apt install -y unclutter xdotool
+apt install -y unclutter
 
 # Configure LightDM for auto-login
 print_status "Configuring LightDM for auto-login..."
@@ -544,19 +552,19 @@ echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
-echo -e "${YELLOW}New Features:${NC}"
-echo "✅ Браузер открывается ПОВЕРХ всех окон"
-echo "✅ Добавлен xdotool для управления окнами"
-echo "✅ Окно браузера получает фокус автоматически"
-echo "✅ Установлен режим 'above' (поверх других окон)"
-echo "✅ Размер окна 1200x700 для удобства"
+echo -e "${YELLOW}Fixed Browser Window:${NC}"
+echo "✅ Браузер открывается в РАЗВЕРНУТОМ окне"
+echo "✅ Окно занимает весь экран (максимизировано)"
+echo "✅ Не полноэкранный режим - видны кнопки управления"
+echo "✅ Автоматическое определение размеров экрана"
+echo "✅ Окно поднимается поверх других окон"
 echo ""
-echo -e "${YELLOW}If browser doesn't open on top, run:${NC}"
-echo "sudo -u kiosk ./kiosk_control.sh focus-browser"
+echo -e "${YELLOW}If browser doesn't maximize properly, run:${NC}"
+echo "sudo -u kiosk ./kiosk_control.sh maximize-browser"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
 echo "2. System starts with fullscreen launcher"
-echo "3. Click 'Browser' to open Firefox on top of all windows"
+echo "3. Click 'Browser' to open maximized Firefox window"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
