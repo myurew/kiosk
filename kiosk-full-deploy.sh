@@ -67,7 +67,9 @@ chown $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
 
 # Create separate Firefox profile for browser windows
 print_status "Creating separate Firefox profile..."
-sudo -u $KIOSK_USER firefox-esr -CreateProfile "browser /home/$KIOSK_USER/.mozilla/firefox/browser"
+sudo -u $KIOSK_USER mkdir -p /home/$KIOSK_USER/.mozilla/firefox
+# Create a simple profile initialization
+sudo -u $KIOSK_USER firefox-esr -CreateProfile "browser" || echo "Firefox profile creation might have issues, continuing..."
 
 # Create HTML launcher
 print_status "Creating HTML launcher..."
@@ -339,22 +341,20 @@ def is_process_running(process_name):
 def launch_browser_normal():
     """Launch browser in completely separate process with normal window"""
     try:
-        # Use a completely separate approach - launch via nohup in new session
+        # Use a completely separate approach - don't use profile to avoid complexity
         env = os.environ.copy()
         env['DISPLAY'] = ':0'
         
-        # Launch Firefox with specific window size and position to ensure it's not fullscreen
+        # Launch Firefox with specific window size and new window
+        # Don't use profile parameter to avoid issues
         process = subprocess.Popen([
             'firefox-esr',
-            '-P', 'browser',
             '-new-window',
-            'about:blank',
-            '-width', '1200',
-            '-height', '800'
+            'about:blank'
         ], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
            preexec_fn=os.setsid)  # New session group
         
-        logging.info("Launched Firefox in separate session with normal window")
+        logging.info("Launched Firefox in separate session")
         return process
         
     except Exception as e:
@@ -362,31 +362,42 @@ def launch_browser_normal():
         return None
 
 def ensure_normal_window():
-    """Ensure browser window is not fullscreen"""
+    """Ensure browser window is not fullscreen - more aggressive approach"""
     try:
-        time.sleep(3)  # Wait for window to appear
+        time.sleep(4)  # Wait longer for window to appear
         
-        # Get all windows
-        result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True)
-        
-        for line in result.stdout.split('\n'):
-            if 'Firefox' in line or 'Mozilla Firefox' in line:
-                window_id = line.split()[0]
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            # Get all windows
+            result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True)
+            
+            firefox_windows = []
+            for line in result.stdout.split('\n'):
+                if 'Firefox' in line or 'Mozilla Firefox' in line:
+                    window_id = line.split()[0]
+                    firefox_windows.append(window_id)
+            
+            if firefox_windows:
+                for window_id in firefox_windows:
+                    # Remove fullscreen mode multiple times to be sure
+                    for _ in range(3):
+                        subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
+                                     capture_output=True)
+                    
+                    # Remove maximized state
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,maximized_vert,maximized_horz'], 
+                                 capture_output=True)
+                    
+                    # Set window to reasonable size (not fullscreen)
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,50,50,1200,700'], 
+                                 capture_output=True)
+                    
+                    logging.info(f"Ensured normal window for {window_id} (attempt {attempt + 1})")
                 
-                # Remove fullscreen mode
-                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
-                             capture_output=True)
-                
-                # Remove maximized state
-                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,maximized_vert,maximized_horz'], 
-                             capture_output=True)
-                
-                # Set window to reasonable size (not fullscreen)
-                subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,100,100,1200,800'], 
-                             capture_output=True)
-                
-                logging.info(f"Ensured normal window for {window_id}")
-                break
+                break  # Success, break out of attempts loop
+            else:
+                logging.info(f"No Firefox windows found yet, waiting... (attempt {attempt + 1})")
+                time.sleep(1)
                 
     except Exception as e:
         logging.error(f"Error ensuring normal window: {str(e)}")
@@ -483,7 +494,7 @@ python3 /home/kiosk/kiosk/kiosk_server.py &
 # Wait for server to start
 sleep 3
 
-# Launch Firefox in fullscreen kiosk mode for launcher using default profile
+# Launch Firefox in fullscreen kiosk mode for launcher
 firefox-esr --kiosk http://localhost:8080 &
 
 # Hide cursor
@@ -537,11 +548,11 @@ echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
 echo -e "${YELLOW}Browser Fix Applied:${NC}"
-echo "✅ Создан отдельный профиль Firefox для браузера"
+echo "✅ Упрощена команда создания профиля Firefox"
 echo "✅ Браузер запускается в новой сессии процесса"
-echo "✅ Указаны конкретные размеры окна (1200x800)"
-echo "✅ Принудительно убирается полноэкранный режим"
-echo "✅ Отдельный процесс от лаунчера"
+echo "✅ Многократные попытки исправления окна"
+echo "✅ Убраны сложные параметры профиля"
+echo "✅ Увеличено время ожидания для стабильности"
 echo ""
 echo -e "${YELLOW}If browser still opens fullscreen, run:${NC}"
 echo "sudo -u kiosk ./kiosk_control.sh fix-browser"
