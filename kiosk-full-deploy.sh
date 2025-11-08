@@ -1,286 +1,381 @@
 #!/bin/bash
 
-# ==========================================
-# Debian Chrome Kiosk - ИСПРАВЛЕНА УСТАНОВКА CHROME
-# ==========================================
+# Kiosk Setup Script for Debian (Openbox + HTML Launcher)
+# Version 1.0
 
-set -e
+set -e  # Exit on any error
 
-# --- НАСТРОЙКИ ---
-KIOSK_USER="kiosk"
-KIOSK_URL="https://www.google.com" # Удален лишний пробел
-REBOOT_AFTER=false
-KEYBOARD_LAYOUT="us"
-# -----------------
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# Проверка root
-if [ "$EUID" -ne 0 ]; then 
-  echo "❌ Запустите от root: sudo $0"
-  exit 1
-fi
+echo -e "${GREEN}=== Starting Kiosk Setup ===${NC}"
 
-# Цвета
-log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
-warn() { echo -e "\033[0;33m[WARN]\033[0m $1"; }
-error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; exit 1; }
-
-log "Начало установки Chrome Kiosk..."
-
-# === ЭТАП 1: Установка базовых пакетов ===
-log "Установка X11 и зависимостей..."
-apt update && apt install -y --no-install-recommends \
-  xserver-xorg xinit openbox \
-  dbus-x11 x11-xserver-utils xfonts-base \
-  wget curl ca-certificates \
-  gnupg software-properties-common
-
-# === ЭТАП 2: Установка Google Chrome (ИСПРАВЛЕННАЯ) ===
-if ! command -v google-chrome-stable &> /dev/null; then
-  log "Установка Google Chrome..."
-  
-  # Создаем временную директорию с правильными правами
-  TEMP_DIR=$(mktemp -d)
-  CHROME_DEB="$TEMP_DIR/chrome.deb"
-  
-  # Скачиваем Chrome во временную директорию
-  log "Скачивание Chrome..."
-  wget -qO "$CHROME_DEB" "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-  
-  # Проверяем что файл скачался
-  if [ ! -f "$CHROME_DEB" ]; then
-    error "Не удалось скачать Chrome"
-  fi
-  
-  log "Установка Chrome через apt (автоматическое разрешение зависимостей)..."
-  # Устанавливаем с помощью apt, который автоматически разрешит зависимости
-  apt install -y "$CHROME_DEB"
-  
-  # Очищаем временные файлы ТОЛЬКО ПОСЛЕ УСПЕШНОЙ УСТАНОВКИ
-  rm -rf "$TEMP_DIR"
-  
-  log "✓ Chrome установлен"
-else
-  log "Google Chrome уже установлен"
-fi
-
-# === ЭТАП 3: Создание пользователя ===
-if ! id "$KIOSK_USER" &>/dev/null; then
-  log "Создание пользователя $KIOSK_USER..."
-  useradd -m -s /bin/bash $KIOSK_USER
-  echo "$KIOSK_USER:kiosk123" | chpasswd
-  log "✓ Пользователь создан (пароль: kiosk123)"
-else
-  log "Пользователь $KIOSK_USER уже существует"
-fi
-
-# Даем права доступа
-usermod -a -G audio,video,tty $KIOSK_USER
-
-# === ЭТАП 4: Создание скрипта киоска БЕЗ ЦИКЛА ===
-KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
-log "Создание скрипта киоска (без цикла)..."
-
-# Подставляем значение KEYBOARD_LAYOUT в скрипт
-cat > "$KIOSK_SCRIPT" <<EOF
-#!/bin/bash
-
-# Логирование
-exec > "/home/\$USER/kiosk.log" 2>&1
-echo "=== Запуск Kiosk: \$(date) ==="
-echo "Пользователь: \$USER"
-
-# Ждем запуска X сервера
-echo "Ожидание X сервера..."
-for i in {1..30}; do
-    if xdpyinfo >/dev/null 2>&1; then
-        echo "✓ X сервер готов на попытке \$i"
-        break
-    fi
-    echo "Ожидание X сервера... \$i/30"
-    sleep 1
-done
-
-# Финальная проверка
-if ! xdpyinfo >/dev/null 2>&1; then
-    echo "❌ X сервер не доступен после 30 секунд"
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}Please run as root: sudo ./kiosk_setup.sh${NC}"
     exit 1
 fi
 
-echo "X сервер запущен успешно"
+# Configuration
+KIOSK_USER="kiosk"
+KIOSK_DIR="/home/$KIOSK_USER/kiosk"
+HTML_LAUNCHER="$KIOSK_DIR/launcher.html"
+PYTHON_SERVER="$KIOSK_DIR/kiosk_server.py"
+OPENBOX_AUTOSTART="/home/$KIOSK_USER/.config/openbox/autostart"
+LIGHTDM_CONF="/etc/lightdm/lightdm.conf"
 
-# Настройки энергосбережения
-xset -dpms
-xset s off
-xset s noblank
+# Function to print status
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
 
-# Очистка старых сессий Chrome (используем -f для подавления ошибок)
-rm -f ~/.config/google-chrome/Singleton*
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
 
-# Установка раскладки (подставляем значение KEYBOARD_LAYOUT)
-setxkbmap $KEYBOARD_LAYOUT
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
 
-# Флаги Chrome для VirtualBox - строка без переносов
-CHROME_FLAGS="--no-first-run --disable-translate --disable-infobars --disable-suggestions-service --disable-save-password-bubble --disable-sync --no-default-browser-check --incognito --kiosk --disable-gpu --no-sandbox --disable-dev-shm-usage"
+# Update system
+print_status "Updating package lists..."
+apt update
 
-echo "Запуск Chrome..."
-echo "URL: $KIOSK_URL" # Подставляем URL без лишних пробелов
+# Install required packages
+print_status "Installing required packages..."
+apt install -y xorg openbox lightdm firefox-esr python3 python3-pip python3-flask feh
 
-# ЗАПУСК CHROME ОДИН РАЗ - БЕЗ ЦИКЛА
-google-chrome-stable \$CHROME_FLAGS "$KIOSK_URL" # Подставляем URL без лишних пробелов
+# Create kiosk user if not exists
+if id "$KIOSK_USER" &>/dev/null; then
+    print_status "User $KIOSK_USER already exists"
+else
+    print_status "Creating user $KIOSK_USER..."
+    adduser --disabled-password --gecos "Kiosk User" $KIOSK_USER
+fi
 
-EXIT_CODE=\$?
-echo "Chrome завершил работу с кодом: \$EXIT_CODE"
-echo "Время завершения: \$(date)"
+# Create kiosk directory
+print_status "Creating kiosk directory..."
+mkdir -p $KIOSK_DIR
+chown $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
 
-# Выходим - systemd сам решит, нужно ли перезапускать
-exit \$EXIT_CODE
+# Create HTML launcher
+print_status "Creating HTML launcher..."
+cat > $HTML_LAUNCHER << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Kiosk Launcher</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            font-family: 'Arial', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            padding: 20px;
+        }
+        
+        .icon {
+            width: 160px;
+            height: 160px;
+            margin: 20px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .icon:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        .icon:active {
+            transform: translateY(-2px);
+        }
+        
+        .icon img {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            filter: invert(1);
+        }
+        
+        .icon-text {
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        
+        .header {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            color: #ecf0f1;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">Киоск-система</div>
+    
+    <div class="container">
+        <div class="icon" onclick="launchApp('firefox-esr')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI0IDhDMTUuMTY0IDggOCAxNS4xNjQgOCAyNHM3LjE2NCAxNiAxNiAxNiAxNi03LjE2NCAxNi0xNlMzMi44MzYgOCAyNCA4em0wIDI4Yy02LjYzIDAtMTItNS4zNy0xMi0xMnM1LjM3LTEyIDEyLTEyIDEyIDUuMzcgMTIgMTItNS4zNyAxMi0xMiAxMnoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMjQgMTBjLTIuODcgMC01LjQzIDEuNTUtNi44MyAzLjg0bDQuMjMgMi4zOWMuNTUtMS4xMiAxLjY1LTEuODcgMi45LTEuODdzMS45OC43NSAyLjU1IDEuODRsNC4yMy0yLjM5QzI5LjQzIDExLjU1IDI2Ljg3IDEwIDI0IDEwem0wIDI4Yy0yLjg3IDAtNS40My0xLjU1LTYuODMtMy44NGw0LjIzIDIuMzljLjU1IDEuMTIgMS42NSAxLjg3IDIuOSAxLjg3czEuOTgtLjc1IDIuNTUtMS44NGw0LjIzIDIuMzlDMjkuNDMgMzYuNDUgMjYuODcgMzggMjQgMzh6Ii8+PC9zdmc+" alt="Browser">
+            <div class="icon-text">Браузер</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('libreoffice')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM4IDQySDEwYTIgMiAwIDAgMS0yLTJWOGEyIDIgMCAwIDEgMi0yaDI4YTIgMiAwIDAgMSAyIDJ2MzJhMiAyIDAgMCAxLTIgMnoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMzUgMzZIMTMuMDFjLS41NiAwLTEuMDEtLjQ1LTEuMDEtMS4wMVYxMy4wMWMwLS41Ni40NS0xLjAxIDEuMDEtMS4wMUgzNWMuNTYgMCAxLjAxLjQ1IDEuMDEgMS4wMVYzNC45OWMwIC41Ni0uNDUgMS4wMS0xLjAxIDEuMDF6Ii8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE2IDE2aDE2djE2SDE2eiIvPjxwYXRoIGZpbGw9IiMzMzMiIGQ9Ik0yNCAyNGw2IDZIMTh6Ii8+PC9zdmc+" alt="Office">
+            <div class="icon-text">Офис</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('thunar')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMTRIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyIDAtLjMzLjEzLS42NS4zNS0uODhMOS4xNCAyOS4yN2MtLjQ4LjQ4LS40OCAxLjI2IDAgMS43NC4yNC4yNC41NS4zNi44Ny4zNi4zMiAwIC42My0uMTIuODctLjM2TDE4LjIzIDIwaDIwLjI3YzEuMzggMCAyLjUtMS4xMiAyLjUtMi41di0xYzAtMS4zOC0xLjEyLTIuNS0yLjUtMi41eiIvPjwvc3ZnPg==" alt="Files">
+            <div class="icon-text">Файлы</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('gnome-calculator')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM4IDQySDEwYTIgMiAwIDAgMS0yLTJWOGEyIDIgMCAwIDEgMi0yaDI4YTIgMiAwIDAgMSAyIDJ2MzJhMiAyIDAgMCAxLTIgMnoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMzUgMzZIMTMuMDFjLS41NiAwLTEuMDEtLjQ1LTEuMDEtMS4wMVYxMy4wMWMwLS41Ni40NS0xLjAxIDEuMDEtMS4wMUgzNWMuNTYgMCAxLjAxLjQ1IDEuMDEgMS4wMVYzNC45OWMwIC41Ni0uNDUgMS4wMS0xLjAxIDEuMDF6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTgiIHk9IjI2IiBmb250LXNpemU9IjE0Ij43ODk8L3RleHQ+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMjQiIHk9IjMyIiBmb250LXNpemU9IjE0Ij40NTY8L3RleHQ+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTIiIHk9IjMyIiBmb250LXNpemU9IjE0Ij4xMjM8L3RleHQ+PC9zdmc+" alt="Calculator">
+            <div class="icon-text">Калькулятор</div>
+        </div>
+    </div>
+
+    <script>
+        function launchApp(command) {
+            console.log('Launching:', command);
+            
+            // Show loading feedback
+            event.target.style.background = 'rgba(52, 152, 219, 0.5)';
+            
+            // Send launch command to server
+            fetch('http://localhost:8080/launch?app=' + encodeURIComponent(command))
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.text();
+                })
+                .then(data => {
+                    console.log('App launched successfully:', command);
+                })
+                .catch(error => {
+                    console.error('Error launching app:', error);
+                    alert('Ошибка запуска приложения: ' + command);
+                })
+                .finally(() => {
+                    // Reset button style after a delay
+                    setTimeout(() => {
+                        event.target.style.background = '';
+                    }, 1000);
+                });
+        }
+        
+        // Prevent right-click context menu
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            return false;
+        });
+    </script>
+</body>
+</html>
 EOF
 
-chmod +x "$KIOSK_SCRIPT"
-chown $KIOSK_USER:$KIOSK_USER "$KIOSK_SCRIPT"
+# Create Python server
+print_status "Creating Python server..."
+cat > $PYTHON_SERVER << 'EOF'
+#!/usr/bin/env python3
+from flask import Flask, request, send_file
+import subprocess
+import os
+import logging
 
-# === ЭТАП 5: Настройка X-сессии ===
-log "Настройка X-сессии..."
+app = Flask(__name__)
 
-cat > "/home/$KIOSK_USER/.xinitrc" <<'EOF'
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Allowed applications for security
+ALLOWED_APPS = {
+    'firefox-esr': 'firefox-esr',
+    'libreoffice': 'libreoffice',
+    'thunar': 'thunar',
+    'gnome-calculator': 'gnome-calculator',
+    'mousepad': 'mousepad',
+    'vlc': 'vlc'
+}
+
+@app.route('/')
+def index():
+    return send_file('/home/kiosk/kiosk/launcher.html')
+
+@app.route('/launch')
+def launch_app():
+    app_name = request.args.get('app', '')
+    
+    # Security check - only allow predefined apps
+    if app_name not in ALLOWED_APPS:
+        logging.warning(f"Attempt to launch unauthorized app: {app_name}")
+        return 'ERROR: Unauthorized application', 403
+    
+    command = ALLOWED_APPS[app_name]
+    
+    try:
+        # Check if application is installed
+        result = subprocess.run(['which', command], capture_output=True, text=True)
+        if result.returncode != 0:
+            logging.error(f"Application not found: {command}")
+            return f'ERROR: Application {app_name} not installed', 404
+        
+        # Launch application in background
+        subprocess.Popen([command], 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
+                        preexec_fn=os.setpgrp)
+        
+        logging.info(f"Successfully launched: {command}")
+        return 'OK'
+        
+    except Exception as e:
+        logging.error(f"Error launching {command}: {str(e)}")
+        return f'ERROR: {str(e)}', 500
+
+@app.route('/health')
+def health_check():
+    return 'OK'
+
+if __name__ == '__main__':
+    logging.info("Starting Kiosk Server on http://0.0.0.0:8080")
+    app.run(host='0.0.0.0', port=8080, debug=False)
+EOF
+
+# Set permissions for kiosk files
+chown -R $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
+chmod +x $PYTHON_SERVER
+
+# Create Openbox autostart directory and file
+print_status "Configuring Openbox autostart..."
+mkdir -p /home/$KIOSK_USER/.config/openbox
+
+cat > $OPENBOX_AUTOSTART << 'EOF'
 #!/bin/bash
+# Openbox autostart script for kiosk
 
-# Запускаем Openbox в фоне
-openbox-session &
+# Set display
+export DISPLAY=:0
 
-# Даем время на запуск
+# Wait for X to be ready
+sleep 2
+
+# Start the kiosk server
+python3 /home/kiosk/kiosk/kiosk_server.py &
+
+# Wait for server to start
 sleep 3
 
-# Запускаем киоск-скрипт ОДИН РАЗ
-exec /home/$USER/kiosk.sh
+# Launch Firefox in kiosk mode
+firefox-esr --kiosk http://localhost:8080/ &
+
+# Hide cursor (optional)
+# unclutter -idle 1 &
+
+# Prevent screen blanking
+xset s off
+xset -dpms
+xset s noblank
+
+# Keep this process running
+wait
 EOF
 
-chmod +x "/home/$KIOSK_USER/.xinitrc"
-chown $KIOSK_USER:$KIOSK_USER "/home/$KIOSK_USER/.xinitrc"
+chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
+chmod +x $OPENBOX_AUTOSTART
 
-# === ЭТАП 6: Настройка systemd сервиса ===
-log "Настройка systemd сервиса..."
+# Configure LightDM for auto-login
+print_status "Configuring LightDM for auto-login..."
+if [ -f $LIGHTDM_CONF ]; then
+    cp $LIGHTDM_CONF $LIGHTDM_CONF.backup
+fi
 
-# Создаем сервис для запуска X
-cat > /etc/systemd/system/kiosk.service <<EOF
-[Unit]
-Description=Chrome Kiosk
-After=network.target
-
-[Service]
-User=$KIOSK_USER
-Group=$KIOSK_USER
-WorkingDirectory=/home/$KIOSK_USER
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/$KIOSK_USER/.Xauthority
-ExecStart=/usr/bin/startx /home/$KIOSK_USER/.xinitrc -- :0 -novtswitch -keeptty
-Restart=on-failure
-RestartSec=10
-StartLimitInterval=60
-StartLimitBurst=3
-
-[Install]
-WantedBy=multi-user.target
+cat > $LIGHTDM_CONF << 'EOF'
+[Seat:*]
+autologin-user=kiosk
+autologin-user-timeout=0
+user-session=openbox
+session-cleanup-script=/usr/bin/pkill -u kiosk
 EOF
 
-systemctl daemon-reload
-systemctl enable kiosk.service
+# Install additional applications (optional)
+print_status "Installing optional applications..."
+apt install -y thunar mousepad vlc
 
-# === ЭТАП 7: Настройка автоматического логина ===
-log "Настройка автоматического логина..."
+# Set up permissions
+print_status "Setting up permissions..."
+usermod -aG audio $KIOSK_USER
+usermod -aG video $KIOSK_USER
 
-# Отключаем стандартный getty на tty1
-systemctl disable getty@tty1.service 2>/dev/null || true
-systemctl mask getty@tty1.service 2>/dev/null || true
+# Enable LightDM
+print_status "Enabling LightDM..."
+systemctl enable lightdm
 
-# Разрешаем запуск X любым пользователям
-echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
-
-# === ЭТАП 8: Альтернативный способ установки Chrome (не используется, т.к. apt install выше должен сработать)===
-log "Проверка установки Chrome..."
-
-if command -v google-chrome-stable &> /dev/null; then
-  log "✓ Chrome успешно установлен"
-  log "Версия: $(google-chrome-stable --version)"
-else
-  error "❌ Не удалось установить Chrome через apt. Проверьте логи."
-  # Альтернативный метод можно добавить здесь, если основной не сработает
-  # warn "Chrome не установлен, пробуем альтернативный метод..."
-  # wget -q -O - https://dl.google.com/linux/linux_signing_key.pub   | apt-key add -
-  # echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-  # apt update
-  # apt install -y google-chrome-stable
-  # if command -v google-chrome-stable &> /dev/null; then
-  #   log "✓ Chrome успешно установлен альтернативным методом"
-  # else
-  #   error "❌ Не удалось установить Chrome альтернативным методом"
-  # fi
-fi
-
-# === ЭТАП 9: Создание скрипта для ручного тестирования ===
-log "Создание тестового скрипта..."
-
-cat > /home/$KIOSK_USER/test-kiosk.sh <<EOF
-#!/bin/bash
-
-echo "=== ТЕСТ KIOSK ==="
-echo "Пользователь: \$USER"
-echo ""
-
-# Проверяем X
-echo "1. Проверка X сервера:"
-if xdpyinfo >/dev/null 2>&1; then
-    echo "   ✓ X сервер работает"
-else
-    echo "   ✗ X сервер не доступен"
-fi
-
-# Проверяем Chrome
-echo ""
-echo "2. Проверка Chrome:"
-if command -v google-chrome-stable >/dev/null 2>&1; then
-    echo "   ✓ Chrome найден"
-    echo "   Версия: \$(google-chrome-stable --version 2>/dev/null)"
-else
-    echo "   ✗ Chrome не найден"
-fi
-
-# Проверяем сервис
-echo ""
-echo "3. Проверка сервиса:"
-systemctl is-active kiosk.service >/dev/null 2>&1 && echo "   ✓ Сервис активен" || echo "   ✗ Сервис не активен"
-
-echo ""
-echo "Тест завершен"
+# Create desktop shortcut for maintenance (optional)
+cat > /usr/share/applications/kiosk-maintenance.desktop << 'EOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Kiosk Maintenance
+Comment=Kiosk System Maintenance
+Exec=gnome-terminal
+Icon=terminal
+Categories=System;
 EOF
 
-chmod +x /home/$KIOSK_USER/test-kiosk.sh
-chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/test-kiosk.sh
-
-# === ЭТАП 10: ИНФОРМАЦИЯ ===
-log "✅ Установка завершена!"
-log ""
-log "🔧 ОСОБЕННОСТИ:"
-log "   • Chrome запускается ОДИН раз (без цикла)"
-log "   • Systemd перезапускает при сбоях"
-log "   • Исправлена установка Chrome через apt"
-log "   • Убран флаг --start-maximized"
-log "   • Исправлены лишние пробелы в URL"
-log "   • Использована переменная KEYBOARD_LAYOUT в kiosk.sh"
-log "   • Использован rm -f для очистки сессии Chrome"
-log ""
-log "📋 ДЛЯ ПРОВЕРКИ:"
-log "   • Статус сервиса: systemctl status kiosk.service"
-log "   • Логи Chrome: tail -f /home/$KIOSK_USER/kiosk.log"
-log "   • Логи systemd: journalctl -u kiosk.service -f"
-
-if [ "$REBOOT_AFTER" = true ]; then
-  log ""
-  log "🔄 Перезагрузка через 5 секунд..."
-  sleep 5
-  reboot
-else
-  log ""
-  log "⚠️  ВЫПОЛНИТЕ ПЕРЕЗАГРУЗКУ:"
-  log "sudo reboot"
-fi
+print_status "Setup completed successfully!"
+echo ""
+echo -e "${GREEN}=== Kiosk Setup Summary ===${NC}"
+echo "User: $KIOSK_USER"
+echo "Kiosk directory: $KIOSK_DIR"
+echo "HTML launcher: $HTML_LAUNCHER"
+echo "Python server: $PYTHON_SERVER"
+echo "Openbox autostart: $OPENBOX_AUTOSTART"
+echo ""
+echo -e "${YELLOW}Next steps:${NC}"
+echo "1. Reboot the system: sudo reboot"
+echo "2. The kiosk will start automatically"
+echo "3. Access the launcher at: http://localhost:8080"
+echo ""
+echo -e "${YELLOW}To exit kiosk mode:${NC}"
+echo "Press Ctrl+Alt+F1 to switch to terminal"
+echo "Login and run: sudo systemctl stop lightdm"
+echo ""
+echo -e "${GREEN}Setup complete! Please reboot.${NC}"
