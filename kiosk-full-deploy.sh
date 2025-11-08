@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 1.1 - Updated apps: removed Office, Calculator; added Terminal
+# Version 1.2 - Added browser close functionality
 
 set -e  # Exit on any error
 
@@ -144,14 +144,93 @@ cat > $HTML_LAUNCHER << 'EOF'
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
             color: #ecf0f1;
         }
+        
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .control-btn {
+            padding: 10px 15px;
+            background: rgba(231, 76, 60, 0.8);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        .control-btn:hover {
+            background: rgba(231, 76, 60, 1);
+            transform: scale(1.05);
+        }
+        
+        .browser-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .browser-btn {
+            padding: 12px 20px;
+            background: rgba(52, 152, 219, 0.8);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .browser-btn:hover {
+            background: rgba(52, 152, 219, 1);
+            transform: scale(1.05);
+        }
+        
+        .browser-btn.close {
+            background: rgba(231, 76, 60, 0.8);
+        }
+        
+        .browser-btn.close:hover {
+            background: rgba(231, 76, 60, 1);
+        }
+        
+        .status-indicator {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            padding: 8px 15px;
+            background: rgba(46, 204, 113, 0.8);
+            border-radius: 20px;
+            font-size: 12px;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="header">Киоск-система</div>
     
-    <div class="container">
+    <div class="control-panel">
+        <button class="control-btn" onclick="showLauncher()">Показать лаунчер</button>
+    </div>
+    
+    <div class="browser-controls" id="browserControls" style="display: none;">
+        <button class="browser-btn close" onclick="closeBrowser()">✕ Закрыть браузер</button>
+        <button class="browser-btn" onclick="showLauncher()">← Вернуться</button>
+    </div>
+    
+    <div class="status-indicator" id="statusIndicator"></div>
+    
+    <div class="container" id="launcher">
         <div class="icon" onclick="launchApp('firefox-esr')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI0IDhDMTUuMTY0IDggOCAxNS4xNjQgOCAyNHM3LjE2NCAxNiAxNiAxNiAxNi03LjE2NCAxNi0xNlMzMi44MzYgOCAyNCA4em0wIDI4Yy02LjYzIDAtMTItNS4zNy0xMi0xMnM1LjM3LTEyIDEyLTEyIDEyIDUuMzcgMTIgMTItNS4zNyAxMi0xMiAxMnoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMjQgMTBjLTIuODcgMC01LjQzIDEuNTUtNi44MyAzLjg0bDQuMjMgMi4zOWMuNTUtMS4xMiAxLjY1LTEuODcgMi45LTEuODdzMS45OC43NSAyLjU1IDEuODRsNC4yMy0yLjM5QzI5LjQzIDExLjU1IDI2Ljg3IDEwIDI0IDEwem0wIDI4Yy0yLjg3IDAtNS40My0xLjU1LTYuODMtMy44NGw0LjIzIDIuMzljLjU1IDEuMTIgMS42NSAxLjg3IDIuOSAxLjg3czEuOTgtLjc1IDIuNTUtMS44NGw0LjIzIDIuMzlDMjkuNDMgMzYuNDUgMjYuODcgMzggMjQgMzh6Ii8+PC9zdmc+" alt="Browser">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI0IDhDMTUuMTY0IDggOCAxNS4xNjQgOCAyNHM3LjE2NCAxNiAxNiAxNiAxNi03LjE2NCAxNi0xNlMzMi44MzYgOCAyNCA4em0wIDI4Yy02LjYzIDAtMTItNS4zNy0xMi0xMnM1LjM3LTEyIDEyLTEyIDEyIDUuMzcgMTIgMTItNS4zNyAxMi0xMiAxMnoiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMjQgMTBjLTIuODcgMC01LjQzIDEuNTUtNi44MyAzLjg0bDQuMjMgMi4zOWMuNTUtMS4xMiAxLjY1LTEuODcgMi45LTEuODdzMS45OC43NSAyLjU1IDEuODhsNC4yMy0yLjM5QzI5LjQzIDExLjU1IDI2Ljg3IDEwIDI0IDEwem0wIDI4Yy0yLjg3IDAtNS40My0xLjU1LTYuODMtMy44NGw0LjIzIDIuMzljLjU1IDEuMTIgMS42NSAxLjg3IDIuOSAxLjg3czEuOTgtLjc1IDIuNTUtMS44NGw0LjIzIDIuMzlDMjkuNDMgMzYuNDUgMjYuODcgMzggMjQgMzh6Ii8+PC9zdmc+" alt="Browser">
             <div class="icon-text">Браузер</div>
         </div>
         
@@ -172,8 +251,22 @@ cat > $HTML_LAUNCHER << 'EOF'
     </div>
 
     <script>
+        let currentApp = null;
+        
+        function showStatus(message, isError = false) {
+            const indicator = document.getElementById('statusIndicator');
+            indicator.textContent = message;
+            indicator.style.display = 'block';
+            indicator.style.background = isError ? 'rgba(231, 76, 60, 0.8)' : 'rgba(46, 204, 113, 0.8)';
+            
+            setTimeout(() => {
+                indicator.style.display = 'none';
+            }, 3000);
+        }
+        
         function launchApp(command) {
             console.log('Launching:', command);
+            currentApp = command;
             
             // Show loading feedback
             event.target.style.background = 'rgba(52, 152, 219, 0.5)';
@@ -188,10 +281,17 @@ cat > $HTML_LAUNCHER << 'EOF'
                 })
                 .then(data => {
                     console.log('App launched successfully:', command);
+                    showStatus('Приложение запущено: ' + getAppName(command));
+                    
+                    // Show browser controls if browser was launched
+                    if (command === 'firefox-esr') {
+                        document.getElementById('browserControls').style.display = 'flex';
+                        document.getElementById('launcher').style.display = 'none';
+                    }
                 })
                 .catch(error => {
                     console.error('Error launching app:', error);
-                    alert('Ошибка запуска приложения: ' + command);
+                    showStatus('Ошибка запуска приложения', true);
                 })
                 .finally(() => {
                     // Reset button style after a delay
@@ -201,13 +301,50 @@ cat > $HTML_LAUNCHER << 'EOF'
                 });
         }
         
+        function closeBrowser() {
+            console.log('Closing browser...');
+            
+            fetch('http://localhost:8080/close?app=firefox-esr')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.text();
+                })
+                .then(data => {
+                    console.log('Browser closed successfully');
+                    showStatus('Браузер закрыт');
+                    showLauncher();
+                })
+                .catch(error => {
+                    console.error('Error closing browser:', error);
+                    showStatus('Ошибка закрытия браузера', true);
+                });
+        }
+        
+        function showLauncher() {
+            document.getElementById('browserControls').style.display = 'none';
+            document.getElementById('launcher').style.display = 'flex';
+            currentApp = null;
+        }
+        
+        function getAppName(command) {
+            const appNames = {
+                'firefox-esr': 'Браузер',
+                'thunar': 'Файловый менеджер',
+                'gnome-terminal': 'Терминал',
+                'mousepad': 'Текстовый редактор'
+            };
+            return appNames[command] || command;
+        }
+        
         // Prevent right-click context menu
         document.addEventListener('contextmenu', function(e) {
             e.preventDefault();
             return false;
         });
         
-        // Prevent keyboard shortcuts
+        // Prevent keyboard shortcuts except allowed ones
         document.addEventListener('keydown', function(e) {
             // Allow only F11 for fullscreen and F5 for refresh
             if (![116, 122].includes(e.keyCode)) { // F5 and F11
@@ -215,6 +352,26 @@ cat > $HTML_LAUNCHER << 'EOF'
                 return false;
             }
         });
+        
+        // Auto-show launcher if no app is running
+        setTimeout(() => {
+            checkBrowserStatus();
+        }, 1000);
+        
+        function checkBrowserStatus() {
+            fetch('http://localhost:8080/status?app=firefox-esr')
+                .then(response => response.text())
+                .then(status => {
+                    if (status === 'RUNNING') {
+                        document.getElementById('browserControls').style.display = 'flex';
+                        document.getElementById('launcher').style.display = 'none';
+                    }
+                })
+                .catch(() => {
+                    // Server not ready yet, try again
+                    setTimeout(checkBrowserStatus, 1000);
+                });
+        }
     </script>
 </body>
 </html>
@@ -224,10 +381,11 @@ EOF
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 import subprocess
 import os
 import logging
+import psutil
 
 app = Flask(__name__)
 
@@ -239,9 +397,37 @@ ALLOWED_APPS = {
     'firefox-esr': 'firefox-esr',
     'thunar': 'thunar',
     'gnome-terminal': 'gnome-terminal',
-    'mousepad': 'mousepad',
-    'vlc': 'vlc'
+    'mousepad': 'mousepad'
 }
+
+def is_process_running(process_name):
+    """Check if a process is running"""
+    try:
+        for proc in psutil.process_iter(['name']):
+            if proc.info['name'] and process_name.lower() in proc.info['name'].lower():
+                return True
+        return False
+    except Exception as e:
+        logging.error(f"Error checking process {process_name}: {str(e)}")
+        return False
+
+def kill_process(process_name):
+    """Kill a process by name"""
+    try:
+        killed = False
+        for proc in psutil.process_iter(['name', 'pid']):
+            if proc.info['name'] and process_name.lower() in proc.info['name'].lower():
+                try:
+                    proc.kill()
+                    proc.wait(timeout=3)
+                    killed = True
+                    logging.info(f"Killed process: {process_name} (PID: {proc.info['pid']})")
+                except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                    pass
+        return killed
+    except Exception as e:
+        logging.error(f"Error killing process {process_name}: {str(e)}")
+        return False
 
 @app.route('/')
 def index():
@@ -278,6 +464,42 @@ def launch_app():
         logging.error(f"Error launching {command}: {str(e)}")
         return f'ERROR: {str(e)}', 500
 
+@app.route('/close')
+def close_app():
+    app_name = request.args.get('app', '')
+    
+    if app_name not in ALLOWED_APPS:
+        logging.warning(f"Attempt to close unauthorized app: {app_name}")
+        return 'ERROR: Unauthorized application', 403
+    
+    command = ALLOWED_APPS[app_name]
+    
+    try:
+        if kill_process(command):
+            logging.info(f"Successfully closed: {command}")
+            return 'OK'
+        else:
+            logging.warning(f"Process not found or couldn't be closed: {command}")
+            return 'ERROR: Process not found', 404
+            
+    except Exception as e:
+        logging.error(f"Error closing {command}: {str(e)}")
+        return f'ERROR: {str(e)}', 500
+
+@app.route('/status')
+def app_status():
+    app_name = request.args.get('app', '')
+    
+    if app_name not in ALLOWED_APPS:
+        return 'ERROR: Unauthorized application', 403
+    
+    command = ALLOWED_APPS[app_name]
+    
+    if is_process_running(command):
+        return 'RUNNING'
+    else:
+        return 'NOT_RUNNING'
+
 @app.route('/health')
 def health_check():
     return 'OK'
@@ -290,6 +512,10 @@ EOF
 # Set permissions for kiosk files
 chown -R $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
 chmod +x $PYTHON_SERVER
+
+# Install psutil for process management
+print_status "Installing Python dependencies..."
+pip3 install psutil
 
 # Create Openbox autostart directory and file
 print_status "Configuring Openbox autostart..."
@@ -356,18 +582,6 @@ usermod -aG video $KIOSK_USER
 print_status "Enabling LightDM..."
 systemctl enable lightdm
 
-# Create desktop shortcut for maintenance (optional)
-cat > /usr/share/applications/kiosk-maintenance.desktop << 'EOF'
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Kiosk Maintenance
-Comment=Kiosk System Maintenance
-Exec=gnome-terminal
-Icon=terminal
-Categories=System;
-EOF
-
 print_status "Setup completed successfully!"
 echo ""
 echo -e "${GREEN}=== Kiosk Setup Summary ===${NC}"
@@ -375,21 +589,17 @@ echo "User: $KIOSK_USER"
 echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
-echo "Openbox autostart: $OPENBOX_AUTOSTART"
 echo ""
-echo -e "${YELLOW}Installed applications:${NC}"
-echo "- Firefox ESR (Браузер)"
-echo "- Thunar (Файлы)" 
-echo "- GNOME Terminal (Терминал)"
-echo "- Mousepad (Текстовый редактор)"
+echo -e "${YELLOW}New Features:${NC}"
+echo "✅ Кнопка 'Закрыть браузер' в правом нижнем углу"
+echo "✅ Кнопка 'Вернуться' для показа лаунчера"
+echo "✅ Панель управления в правом верхнем углу"
+echo "✅ Индикаторы статуса приложений"
+echo "✅ Автоматическое определение запущенного браузера"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
 echo "2. The kiosk will start automatically"
-echo "3. Access the launcher at: http://localhost:8080"
-echo ""
-echo -e "${YELLOW}To exit kiosk mode:${NC}"
-echo "Press Ctrl+Alt+F1 to switch to terminal"
-echo "Login and run: sudo systemctl stop lightdm"
+echo "3. Use 'Close Browser' button to return to launcher"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
