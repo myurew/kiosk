@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 1.2 - Added browser close functionality
+# Version 1.2 - Fixed externally-managed-environment error
 
 set -e  # Exit on any error
 
@@ -37,7 +37,7 @@ print_warning() {
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1
 }
 
 # Update system
@@ -46,13 +46,13 @@ apt update
 
 # Install required packages
 print_status "Installing required packages..."
-apt install -y xorg openbox lightdm firefox-esr python3 python3-pip python3-flask feh
+apt install -y xorg openbox lightdm firefox-esr python3 python3-pip python3-venv python3-psutil feh
 
 # Create kiosk user if not exists
 if id "$KIOSK_USER" &>/dev/null; then
     print_status "User $KIOSK_USER already exists"
 else
-    print_status "Creating user $KIOSK_USER..."
+    print_status "Creating user $KIOSk_USER..."
     adduser --disabled-password --gecos "Kiosk User" $KIOSK_USER
 fi
 
@@ -245,7 +245,7 @@ cat > $HTML_LAUNCHER << 'EOF'
         </div>
         
         <div class="icon" onclick="launchApp('mousepad')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMj000MC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
             <div class="icon-text">Текстовый редактор</div>
         </div>
     </div>
@@ -377,15 +377,14 @@ cat > $HTML_LAUNCHER << 'EOF'
 </html>
 EOF
 
-# Create Python server
+# Create Python server without external dependencies
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file
 import subprocess
 import os
 import logging
-import psutil
 
 app = Flask(__name__)
 
@@ -401,30 +400,26 @@ ALLOWED_APPS = {
 }
 
 def is_process_running(process_name):
-    """Check if a process is running"""
+    """Check if a process is running using pgrep"""
     try:
-        for proc in psutil.process_iter(['name']):
-            if proc.info['name'] and process_name.lower() in proc.info['name'].lower():
-                return True
-        return False
+        result = subprocess.run(['pgrep', '-f', process_name], 
+                              capture_output=True, text=True)
+        return result.returncode == 0
     except Exception as e:
         logging.error(f"Error checking process {process_name}: {str(e)}")
         return False
 
 def kill_process(process_name):
-    """Kill a process by name"""
+    """Kill a process by name using pkill"""
     try:
-        killed = False
-        for proc in psutil.process_iter(['name', 'pid']):
-            if proc.info['name'] and process_name.lower() in proc.info['name'].lower():
-                try:
-                    proc.kill()
-                    proc.wait(timeout=3)
-                    killed = True
-                    logging.info(f"Killed process: {process_name} (PID: {proc.info['pid']})")
-                except (psutil.NoSuchProcess, psutil.TimeoutExpired):
-                    pass
-        return killed
+        result = subprocess.run(['pkill', '-f', process_name], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            logging.info(f"Successfully killed: {process_name}")
+            return True
+        else:
+            logging.warning(f"Process not found: {process_name}")
+            return False
     except Exception as e:
         logging.error(f"Error killing process {process_name}: {str(e)}")
         return False
@@ -513,9 +508,9 @@ EOF
 chown -R $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
 chmod +x $PYTHON_SERVER
 
-# Install psutil for process management
-print_status "Installing Python dependencies..."
-pip3 install psutil
+# Install Flask using system package manager instead of pip
+print_status "Installing Python dependencies via apt..."
+apt install -y python3-flask
 
 # Create Openbox autostart directory and file
 print_status "Configuring Openbox autostart..."
@@ -589,6 +584,11 @@ echo "User: $KIOSK_USER"
 echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
+echo ""
+echo -e "${YELLOW}Fixed Issues:${NC}"
+echo "✅ Решена проблема externally-managed-environment"
+echo "✅ Используются только пакеты из системного репозитория"
+echo "✅ Установка через apt вместо pip"
 echo ""
 echo -e "${YELLOW}New Features:${NC}"
 echo "✅ Кнопка 'Закрыть браузер' в правом нижнем углу"
