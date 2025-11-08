@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 3.3 - Fixed browser fullscreen issue
+# Version 3.4 - Browser opens on top of all windows
 
 set -e  # Exit on any error
 
@@ -46,7 +46,7 @@ apt update
 
 # Install required packages
 print_status "Installing required packages..."
-apt install -y xorg openbox lightdm firefox-esr python3 python3-flask feh wmctrl
+apt install -y xorg openbox lightdm firefox-esr python3 python3-flask feh wmctrl xdotool
 
 # Install audio and display management packages
 print_status "Installing audio and display packages..."
@@ -64,9 +64,6 @@ fi
 print_status "Creating kiosk directory..."
 mkdir -p $KIOSK_DIR
 chown $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
-
-# Skip problematic Firefox profile creation - we'll handle it differently
-print_status "Setting up Firefox configuration..."
 
 # Create HTML launcher
 print_status "Creating HTML launcher..."
@@ -298,7 +295,7 @@ cat > $HTML_LAUNCHER << 'EOF'
 </html>
 EOF
 
-# Create Python server with completely separate browser process
+# Create Python server with browser on top
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
@@ -357,8 +354,8 @@ def launch_browser_normal():
         logging.error(f"Error launching browser: {str(e)}")
         return None
 
-def ensure_normal_window():
-    """Ensure browser window is not fullscreen - aggressive approach"""
+def ensure_browser_on_top():
+    """Ensure browser window is on top of all windows"""
     try:
         time.sleep(3)  # Wait for window to appear
         
@@ -375,26 +372,32 @@ def ensure_normal_window():
             
             if firefox_windows:
                 for window_id in firefox_windows:
-                    # Force remove fullscreen
+                    # Remove fullscreen and maximized
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
                                  capture_output=True)
-                    
-                    # Remove maximized state
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,maximized_vert,maximized_horz'], 
                                  capture_output=True)
                     
                     # Set specific size and position
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,100,100,1000,600'], 
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,50,50,1200,700'], 
                                  capture_output=True)
                     
-                    logging.info(f"Fixed Firefox window {window_id} to normal size")
+                    # Make window always on top (above)
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,above'], 
+                                 capture_output=True)
+                    
+                    # Activate and focus the window using xdotool
+                    subprocess.run(['xdotool', 'search', '--name', 'Mozilla Firefox', 'windowactivate'], 
+                                 capture_output=True)
+                    
+                    logging.info(f"Set Firefox window {window_id} on top of all windows")
                 
                 break  # Success
             else:
                 time.sleep(0.5)  # Wait and try again
                 
     except Exception as e:
-        logging.error(f"Error ensuring normal window: {str(e)}")
+        logging.error(f"Error ensuring browser on top: {str(e)}")
 
 @app.route('/')
 def index():
@@ -424,7 +427,7 @@ def launch_app():
             if process:
                 # Run window management in background
                 import threading
-                threading.Thread(target=ensure_normal_window).start()
+                threading.Thread(target=ensure_browser_on_top).start()
             else:
                 return 'ERROR: Failed to launch browser', 500
         else:
@@ -506,9 +509,9 @@ EOF
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 chmod +x $OPENBOX_AUTOSTART
 
-# Install unclutter for hiding cursor
+# Install unclutter for hiding cursor and xdotool for window control
 print_status "Installing additional tools..."
-apt install -y unclutter
+apt install -y unclutter xdotool
 
 # Configure LightDM for auto-login
 print_status "Configuring LightDM for auto-login..."
@@ -541,18 +544,19 @@ echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
-echo -e "${YELLOW}Fixed Issues:${NC}"
-echo "✅ Убрана проблемная строка создания профиля Firefox"
-echo "✅ Браузер запускается в отдельной сессии"
-echo "✅ Агрессивное управление окнами (10 попыток)"
-echo "✅ Установлен конкретный размер окна 1000x600"
+echo -e "${YELLOW}New Features:${NC}"
+echo "✅ Браузер открывается ПОВЕРХ всех окон"
+echo "✅ Добавлен xdotool для управления окнами"
+echo "✅ Окно браузера получает фокус автоматически"
+echo "✅ Установлен режим 'above' (поверх других окон)"
+echo "✅ Размер окна 1200x700 для удобства"
 echo ""
-echo -e "${YELLOW}If browser still opens fullscreen, run:${NC}"
-echo "sudo -u kiosk ./kiosk_control.sh fix-browser"
+echo -e "${YELLOW}If browser doesn't open on top, run:${NC}"
+echo "sudo -u kiosk ./kiosk_control.sh focus-browser"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
 echo "2. System starts with fullscreen launcher"
-echo "3. Click 'Browser' to open normal Firefox window"
+echo "3. Click 'Browser' to open Firefox on top of all windows"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
