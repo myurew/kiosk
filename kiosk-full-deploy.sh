@@ -37,7 +37,7 @@ print_warning() {
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
 # Update system
@@ -52,7 +52,7 @@ apt install -y xorg openbox lightdm firefox-esr python3 python3-pip python3-venv
 if id "$KIOSK_USER" &>/dev/null; then
     print_status "User $KIOSK_USER already exists"
 else
-    print_status "Creating user $KIOSk_USER..."
+    print_status "Creating user $KIOSK_USER..."
     adduser --disabled-password --gecos "Kiosk User" $KIOSK_USER
 fi
 
@@ -245,7 +245,7 @@ cat > $HTML_LAUNCHER << 'EOF'
         </div>
         
         <div class="icon" onclick="launchApp('mousepad')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMj000MC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
             <div class="icon-text">Текстовый редактор</div>
         </div>
     </div>
