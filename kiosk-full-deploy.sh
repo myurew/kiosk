@@ -8,7 +8,7 @@ set -e
 
 # --- НАСТРОЙКИ ---
 KIOSK_USER="kiosk"
-KIOSK_URL="https://www.google.com"
+KIOSK_URL="https://www.google.com" # Удален лишний пробел
 REBOOT_AFTER=false
 KEYBOARD_LAYOUT="us"
 # -----------------
@@ -51,11 +51,11 @@ if ! command -v google-chrome-stable &> /dev/null; then
     error "Не удалось скачать Chrome"
   fi
   
-  log "Установка Chrome..."
-  # Устанавливаем с исправлением зависимостей
-  dpkg -i "$CHROME_DEB" || apt-get install -f -y
+  log "Установка Chrome через apt (автоматическое разрешение зависимостей)..."
+  # Устанавливаем с помощью apt, который автоматически разрешит зависимости
+  apt install -y "$CHROME_DEB"
   
-  # Очищаем временные файлы
+  # Очищаем временные файлы ТОЛЬКО ПОСЛЕ УСПЕШНОЙ УСТАНОВКИ
   rm -rf "$TEMP_DIR"
   
   log "✓ Chrome установлен"
@@ -80,22 +80,23 @@ usermod -a -G audio,video,tty $KIOSK_USER
 KIOSK_SCRIPT="/home/$KIOSK_USER/kiosk.sh"
 log "Создание скрипта киоска (без цикла)..."
 
-cat > "$KIOSK_SCRIPT" <<'EOF'
+# Подставляем значение KEYBOARD_LAYOUT в скрипт
+cat > "$KIOSK_SCRIPT" <<EOF
 #!/bin/bash
 
 # Логирование
-exec > "/home/$USER/kiosk.log" 2>&1
-echo "=== Запуск Kiosk: $(date) ==="
-echo "Пользователь: $USER"
+exec > "/home/\$USER/kiosk.log" 2>&1
+echo "=== Запуск Kiosk: \$(date) ==="
+echo "Пользователь: \$USER"
 
 # Ждем запуска X сервера
 echo "Ожидание X сервера..."
 for i in {1..30}; do
     if xdpyinfo >/dev/null 2>&1; then
-        echo "✓ X сервер готов на попытке $i"
+        echo "✓ X сервер готов на попытке \$i"
         break
     fi
-    echo "Ожидание X сервера... $i/30"
+    echo "Ожидание X сервера... \$i/30"
     sleep 1
 done
 
@@ -112,41 +113,27 @@ xset -dpms
 xset s off
 xset s noblank
 
-# Очистка старых сессий Chrome
-rm -rf ~/.config/google-chrome/Singleton*
+# Очистка старых сессий Chrome (используем -f для подавления ошибок)
+rm -f ~/.config/google-chrome/Singleton*
 
-# Установка раскладки
-setxkbmap us
+# Установка раскладки (подставляем значение KEYBOARD_LAYOUT)
+setxkbmap $KEYBOARD_LAYOUT
 
-# Флаги Chrome для VirtualBox
-CHROME_FLAGS="
---no-first-run
---disable-translate
---disable-infobars
---disable-suggestions-service
---disable-save-password-bubble
---disable-sync
---no-default-browser-check
---incognito
---kiosk
---start-maximized
---disable-gpu
---no-sandbox
---disable-dev-shm-usage
-"
+# Флаги Chrome для VirtualBox - строка без переносов
+CHROME_FLAGS="--no-first-run --disable-translate --disable-infobars --disable-suggestions-service --disable-save-password-bubble --disable-sync --no-default-browser-check --incognito --kiosk --disable-gpu --no-sandbox --disable-dev-shm-usage"
 
 echo "Запуск Chrome..."
-echo "URL: https://www.google.com"
+echo "URL: $KIOSK_URL" # Подставляем URL без лишних пробелов
 
 # ЗАПУСК CHROME ОДИН РАЗ - БЕЗ ЦИКЛА
-google-chrome-stable $CHROME_FLAGS "https://www.google.com"
+google-chrome-stable \$CHROME_FLAGS "$KIOSK_URL" # Подставляем URL без лишних пробелов
 
-EXIT_CODE=$?
-echo "Chrome завершил работу с кодом: $EXIT_CODE"
-echo "Время завершения: $(date)"
+EXIT_CODE=\$?
+echo "Chrome завершил работу с кодом: \$EXIT_CODE"
+echo "Время завершения: \$(date)"
 
 # Выходим - systemd сам решит, нужно ли перезапускать
-exit $EXIT_CODE
+exit \$EXIT_CODE
 EOF
 
 chmod +x "$KIOSK_SCRIPT"
@@ -209,31 +196,31 @@ systemctl mask getty@tty1.service 2>/dev/null || true
 # Разрешаем запуск X любым пользователям
 echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# === ЭТАП 8: Альтернативный способ установки Chrome ===
+# === ЭТАП 8: Альтернативный способ установки Chrome (не используется, т.к. apt install выше должен сработать)===
 log "Проверка установки Chrome..."
 
-if ! command -v google-chrome-stable &> /dev/null; then
-  warn "Chrome не установлен, пробуем альтернативный метод..."
-  
-  # Устанавливаем через официальный репозиторий
-  wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
-  echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-  apt update
-  apt install -y google-chrome-stable
-fi
-
-# Финальная проверка Chrome
 if command -v google-chrome-stable &> /dev/null; then
   log "✓ Chrome успешно установлен"
   log "Версия: $(google-chrome-stable --version)"
 else
-  error "❌ Не удалось установить Chrome"
+  error "❌ Не удалось установить Chrome через apt. Проверьте логи."
+  # Альтернативный метод можно добавить здесь, если основной не сработает
+  # warn "Chrome не установлен, пробуем альтернативный метод..."
+  # wget -q -O - https://dl.google.com/linux/linux_signing_key.pub   | apt-key add -
+  # echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+  # apt update
+  # apt install -y google-chrome-stable
+  # if command -v google-chrome-stable &> /dev/null; then
+  #   log "✓ Chrome успешно установлен альтернативным методом"
+  # else
+  #   error "❌ Не удалось установить Chrome альтернативным методом"
+  # fi
 fi
 
 # === ЭТАП 9: Создание скрипта для ручного тестирования ===
 log "Создание тестового скрипта..."
 
-cat > /home/$KIOSK_USER/test-kiosk.sh <<'EOF'
+cat > /home/$KIOSK_USER/test-kiosk.sh <<EOF
 #!/bin/bash
 
 echo "=== ТЕСТ KIOSK ==="
@@ -276,7 +263,11 @@ log ""
 log "🔧 ОСОБЕННОСТИ:"
 log "   • Chrome запускается ОДИН раз (без цикла)"
 log "   • Systemd перезапускает при сбоях"
-log "   • Исправлена установка Chrome"
+log "   • Исправлена установка Chrome через apt"
+log "   • Убран флаг --start-maximized"
+log "   • Исправлены лишние пробелы в URL"
+log "   • Использована переменная KEYBOARD_LAYOUT в kiosk.sh"
+log "   • Использован rm -f для очистки сессии Chrome"
 log ""
 log "📋 ДЛЯ ПРОВЕРКИ:"
 log "   • Статус сервиса: systemctl status kiosk.service"
