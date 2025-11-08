@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Debian Chrome Kiosk - БЕЗ ЦИКЛИЧЕСКОГО ПЕРЕЗАПУСКА
-# Chrome запускается один раз, перезапуск через systemd
+# Debian Chrome Kiosk - ИСПРАВЛЕНА УСТАНОВКА CHROME
 # ==========================================
 
 set -e
@@ -25,21 +24,41 @@ log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[0;33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; exit 1; }
 
-log "Начало установки Chrome Kiosk (без цикла)..."
+log "Начало установки Chrome Kiosk..."
 
 # === ЭТАП 1: Установка базовых пакетов ===
 log "Установка X11 и зависимостей..."
 apt update && apt install -y --no-install-recommends \
   xserver-xorg xinit openbox \
   dbus-x11 x11-xserver-utils xfonts-base \
-  wget curl ca-certificates
+  wget curl ca-certificates \
+  gnupg software-properties-common
 
-# === ЭТАП 2: Установка Google Chrome ===
+# === ЭТАП 2: Установка Google Chrome (ИСПРАВЛЕННАЯ) ===
 if ! command -v google-chrome-stable &> /dev/null; then
   log "Установка Google Chrome..."
-  wget -qO /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-  dpkg -i /tmp/chrome.deb || (apt-get install -f -y && dpkg -i /tmp/chrome.deb)
-  rm -f /tmp/chrome.deb
+  
+  # Создаем временную директорию с правильными правами
+  TEMP_DIR=$(mktemp -d)
+  CHROME_DEB="$TEMP_DIR/chrome.deb"
+  
+  # Скачиваем Chrome во временную директорию
+  log "Скачивание Chrome..."
+  wget -qO "$CHROME_DEB" "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+  
+  # Проверяем что файл скачался
+  if [ ! -f "$CHROME_DEB" ]; then
+    error "Не удалось скачать Chrome"
+  fi
+  
+  log "Установка Chrome..."
+  # Устанавливаем с исправлением зависимостей
+  dpkg -i "$CHROME_DEB" || apt-get install -f -y
+  
+  # Очищаем временные файлы
+  rm -rf "$TEMP_DIR"
+  
+  log "✓ Chrome установлен"
 else
   log "Google Chrome уже установлен"
 fi
@@ -120,7 +139,6 @@ echo "Запуск Chrome..."
 echo "URL: https://www.google.com"
 
 # ЗАПУСК CHROME ОДИН РАЗ - БЕЗ ЦИКЛА
-# Если Chrome закроется, systemd перезапустит сервис
 google-chrome-stable $CHROME_FLAGS "https://www.google.com"
 
 EXIT_CODE=$?
@@ -191,7 +209,28 @@ systemctl mask getty@tty1.service 2>/dev/null || true
 # Разрешаем запуск X любым пользователям
 echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
 
-# === ЭТАП 8: Создание скрипта для ручного тестирования ===
+# === ЭТАП 8: Альтернативный способ установки Chrome ===
+log "Проверка установки Chrome..."
+
+if ! command -v google-chrome-stable &> /dev/null; then
+  warn "Chrome не установлен, пробуем альтернативный метод..."
+  
+  # Устанавливаем через официальный репозиторий
+  wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+  echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+  apt update
+  apt install -y google-chrome-stable
+fi
+
+# Финальная проверка Chrome
+if command -v google-chrome-stable &> /dev/null; then
+  log "✓ Chrome успешно установлен"
+  log "Версия: $(google-chrome-stable --version)"
+else
+  error "❌ Не удалось установить Chrome"
+fi
+
+# === ЭТАП 9: Создание скрипта для ручного тестирования ===
 log "Создание тестового скрипта..."
 
 cat > /home/$KIOSK_USER/test-kiosk.sh <<'EOF'
@@ -231,22 +270,18 @@ EOF
 chmod +x /home/$KIOSK_USER/test-kiosk.sh
 chown $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/test-kiosk.sh
 
-# === ЭТАП 9: ИНФОРМАЦИЯ ===
+# === ЭТАП 10: ИНФОРМАЦИЯ ===
 log "✅ Установка завершена!"
 log ""
 log "🔧 ОСОБЕННОСТИ:"
 log "   • Chrome запускается ОДИН раз (без цикла)"
-log "   • Systemd перезапускает при сбоях (Restart=on-failure)"
-log "   • Задержка между перезапусками: 10 секунд"
-log "   • Максимум 3 перезапуска в минуту"
+log "   • Systemd перезапускает при сбоях"
+log "   • Исправлена установка Chrome"
 log ""
 log "📋 ДЛЯ ПРОВЕРКИ:"
 log "   • Статус сервиса: systemctl status kiosk.service"
 log "   • Логи Chrome: tail -f /home/$KIOSK_USER/kiosk.log"
 log "   • Логи systemd: journalctl -u kiosk.service -f"
-log ""
-log "🔧 РУЧНОЙ ЗАПУСК:"
-log "   sudo -u $KIOSK_USER startx /home/$KIOSK_USER/.xinitrc"
 
 if [ "$REBOOT_AFTER" = true ]; then
   log ""
