@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 3.1 - Fullscreen launcher + maximized browser windows
+# Version 3.2 - Fixed browser window + added audio and display apps
 
 set -e  # Exit on any error
 
@@ -47,6 +47,10 @@ apt update
 # Install required packages
 print_status "Installing required packages..."
 apt install -y xorg openbox lightdm firefox-esr python3 python3-flask feh wmctrl
+
+# Install audio and display management packages
+print_status "Installing audio and display packages..."
+apt install -y audacious pavucontrol arandr vlc
 
 # Create kiosk user if not exists
 if id "$KIOSK_USER" &>/dev/null; then
@@ -94,9 +98,9 @@ cat > $HTML_LAUNCHER << 'EOF'
         }
         
         .icon {
-            width: 160px;
-            height: 160px;
-            margin: 20px;
+            width: 140px;
+            height: 140px;
+            margin: 15px;
             cursor: pointer;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 15px;
@@ -120,17 +124,18 @@ cat > $HTML_LAUNCHER << 'EOF'
         }
         
         .icon img {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 15px;
+            width: 48px;
+            height: 48px;
+            margin-bottom: 10px;
             filter: invert(1);
         }
         
         .icon-text {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: bold;
             text-align: center;
             text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            padding: 0 5px;
         }
         
         .header {
@@ -168,6 +173,26 @@ cat > $HTML_LAUNCHER << 'EOF'
             <div class="icon-text">Браузер</div>
         </div>
         
+        <div class="icon" onclick="launchApp('audacious')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTI0IDZ2MzZMMTAgMzBWNmgyem0yMiAwaC0xNnYzNmwxNi0xMlY2eiIvPjxjaXJjbGUgZmlsbD0iI2ZmZiIgY3g9IjI0IiBjeT0iMjQiIHI9IjgiLz48L3N2Zz4=" alt="Music">
+            <div class="icon-text">Музыка</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('pavucontrol')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM0IDZ2MzZINnYtMjRoOHYtMTJoMjB6bS0yIDJoLTE2djhoMTZ2LTh6bS04IDEwaC04djE0aDh2LTE0em0yIDJoNHYxMGgtNHYtMTB6bTggMGg0djEwaC00di0xMHoiLz48L3N2Zz4=" alt="Audio Control">
+            <div class="icon-text">Звук</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('arandr')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTggMTBoMzJ2MjhIOHptMiAyaDI4djI0SDEwdi0yNHptMTIgNGg0djE2aC00di0xNnptOCAwaDR2MTZoLTR2LTE2eiIvPjxyZWN0IGZpbGw9IiNmZmYiIHg9IjM4IiB5PSIxNCIgd2lkdGg9IjYiIGhlaWdodD0iOCIvPjxyZWN0IGZpbGw9IiNmZmYiIHg9IjM4IiB5PSIyNiIgd2lkdGg9IjYiIGhlaWdodD0iOCIvPjxyZWN0IGZpbGw9IiNmZmYiIHg9IjQiIHk9IjE0IiB3aWR0aD0iNiIgaGVpZ2h0PSI4Ii8+PHJlY3QgZmlsbD0iI2ZmZiIgeD0iNCIgeT0iMjYiIHdpZHRoPSI2IiBoZWlnaHQ9IjgiLz48L3N2Zz4=" alt="Display">
+            <div class="icon-text">Экран</div>
+        </div>
+        
+        <div class="icon" onclick="launchApp('vlc')">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTM2IDh2MzJIMTJWOGgyNHptLTIgMkgxNHYyOGgyMFYxMHptLTggNGg0djIwaC00VjE0eiIvPjwvc3ZnPg==" alt="Video">
+            <div class="icon-text">Видео</div>
+        </div>
+        
         <div class="icon" onclick="launchApp('thunar')">
             <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDEySDIybC00LTRIOGMtMi4yMSAwLTQgMS43OS00IDR2MjRjMCAyLjIxIDEuNzkgNCA0IDRoMzJjMi4yMSAwIDQtMS43OSA0LTRWMTZjMC0yLjIxLTEuNzktNC00LTR6Ii8+PHBhdGggZmlsbD0iIzMzMyIgZD0iTTM4LjUgMTRIMTkuNjFjLS42OSAwLTEuMjMtLjU0LTEuMjMtMS4yMyAwLS4zMy4xMy0uNjUuMzUtLjg4TDkuMTQgMjkuMjdjLS40OC40OC0uNDggMS4yNiAwIDEuNzQuMjQuMjQuNTUuMzYuODcuMzYuMzIgMCAuNjMtLjEyLjg3LS4zNkwxOC4yMyAyMGgyMC4yN2MxLjM4IDAgMi41LTEuMTIgMi41LTIuNXYtMWMwLTEuMzgtMS4xMi0yLjUtMi41LTIuNXoiLz48L3N2Zz4=" alt="Files">
             <div class="icon-text">Файлы</div>
@@ -179,7 +204,7 @@ cat > $HTML_LAUNCHER << 'EOF'
         </div>
         
         <div class="icon" onclick="launchApp('mousepad')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCA1LjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
             <div class="icon-text">Текстовый редактор</div>
         </div>
     </div>
@@ -229,7 +254,11 @@ cat > $HTML_LAUNCHER << 'EOF'
         function getAppName(command) {
             const appNames = {
                 'firefox': 'Браузер',
-                'thunar': 'Файловый менеджер',
+                'audacious': 'Музыка',
+                'pavucontrol': 'Звук',
+                'arandr': 'Экран',
+                'vlc': 'Видео',
+                'thunar': 'Файлы',
                 'gnome-terminal': 'Терминал',
                 'mousepad': 'Текстовый редактор'
             };
@@ -266,7 +295,7 @@ cat > $HTML_LAUNCHER << 'EOF'
 </html>
 EOF
 
-# Create Python server with window management
+# Create Python server with proper window management
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
@@ -284,6 +313,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Allowed applications for security
 ALLOWED_APPS = {
     'firefox': 'firefox-esr',
+    'audacious': 'audacious',
+    'pavucontrol': 'pavucontrol',
+    'arandr': 'arandr',
+    'vlc': 'vlc',
     'thunar': 'thunar',
     'gnome-terminal': 'gnome-terminal',
     'mousepad': 'mousepad'
@@ -299,29 +332,46 @@ def is_process_running(process_name):
         logging.error(f"Error checking process {process_name}: {str(e)}")
         return False
 
-def maximize_firefox_window():
-    """Maximize Firefox window using wmctrl"""
+def setup_firefox_window():
+    """Setup Firefox window to be normal size (not fullscreen)"""
     try:
         # Wait for Firefox window to appear
-        time.sleep(2)
+        time.sleep(3)
         
-        # Find Firefox window and maximize it
+        # Find Firefox window
         result = subprocess.run([
             'wmctrl', '-l'
         ], capture_output=True, text=True)
         
+        firefox_windows = []
         for line in result.stdout.split('\n'):
             if 'Firefox' in line or 'Mozilla Firefox' in line:
                 window_id = line.split()[0]
-                # Maximize the window
-                subprocess.run([
-                    'wmctrl', '-i', '-r', window_id, '-b', 'add,maximized_vert,maximized_horz'
-                ])
-                logging.info(f"Maximized Firefox window: {window_id}")
-                break
+                firefox_windows.append(window_id)
+        
+        if firefox_windows:
+            # Use the newest Firefox window (last in list)
+            window_id = firefox_windows[-1]
+            
+            # First, remove any fullscreen mode
+            subprocess.run([
+                'wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'
+            ])
+            
+            # Then maximize the window (but not fullscreen)
+            subprocess.run([
+                'wmctrl', '-i', '-r', window_id, '-b', 'add,maximized_vert,maximized_horz'
+            ])
+            
+            # Ensure it's not fullscreen
+            subprocess.run([
+                'wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'
+            ])
+            
+            logging.info(f"Setup Firefox window {window_id} as maximized (not fullscreen)")
                 
     except Exception as e:
-        logging.error(f"Error maximizing Firefox window: {str(e)}")
+        logging.error(f"Error setting up Firefox window: {str(e)}")
 
 @app.route('/')
 def index():
@@ -345,17 +395,17 @@ def launch_app():
             logging.error(f"Application not found: {command}")
             return f'ERROR: Application {app_name} not installed', 404
         
-        # For Firefox, launch in maximized window
+        # For Firefox, launch in normal window (not fullscreen)
         if command == 'firefox-esr':
-            # Launch Firefox with new window (not fullscreen)
+            # Launch Firefox with new window
             process = subprocess.Popen([
                 command,
                 '--new-window',
                 'about:blank'
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Maximize the Firefox window after launch
-            maximize_firefox_window()
+            # Setup the window to be maximized but not fullscreen
+            setup_firefox_window()
             
         else:
             # For other apps, launch normally
@@ -436,9 +486,9 @@ EOF
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 chmod +x $OPENBOX_AUTOSTART
 
-# Install unclutter for hiding cursor and wmctrl for window management
+# Install unclutter for hiding cursor
 print_status "Installing additional tools..."
-apt install -y unclutter wmctrl
+apt install -y unclutter
 
 # Configure LightDM for auto-login
 print_status "Configuring LightDM for auto-login..."
@@ -453,10 +503,6 @@ autologin-user-timeout=0
 user-session=openbox
 session-cleanup-script=/usr/bin/pkill -u kiosk
 EOF
-
-# Install additional applications
-print_status "Installing applications..."
-apt install -y thunar mousepad gnome-terminal
 
 # Set up permissions
 print_status "Setting up permissions..."
@@ -475,18 +521,22 @@ echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
-echo -e "${YELLOW}How it works now:${NC}"
-echo "✅ Лаунчер запускается в полноэкранном режиме (киоск-режим)"
-echo "✅ При нажатии 'Браузер' открывается НОВОЕ окно Firefox"
-echo "✅ Новое окно автоматически РАЗВЕРНУТО (максимизировано)"
-echo "✅ Браузер имеет нормальный интерфейс: вкладки, адресная строка, кнопки"
-echo "✅ Можно сворачивать/разворачивать/закрывать браузер обычными способами"
-echo "✅ Лаунчер остается открытым в фоне в полноэкранном режиме"
+echo -e "${YELLOW}New Applications Added:${NC}"
+echo "🎵 Audacious - музыкальный проигрыватель"
+echo "🔊 Pavucontrol - управление звуком"
+echo "🖥️ ARandR - управление экранами и разрешением"
+echo "🎬 VLC - видеоплеер"
+echo ""
+echo -e "${YELLOW}Fixed Browser Window:${NC}"
+echo "✅ Браузер теперь открывается в развернутом окне"
+echo "✅ Видны кнопки управления, вкладки, адресная строка"
+echo "✅ Не переходит в полноэкранный режим"
+echo "✅ Можно нормально управлять окном"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
 echo "2. System starts with fullscreen launcher"
-echo "3. Click 'Browser' to open maximized Firefox window"
-echo "4. Close Firefox to return to fullscreen launcher"
+echo "3. Click any icon to launch application"
+echo "4. Browser opens in normal maximized window"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
