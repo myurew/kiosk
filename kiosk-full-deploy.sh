@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kiosk Setup Script for Debian (Openbox + HTML Launcher)
-# Version 3.0 - Fullscreen launcher + normal browser windows
+# Version 3.1 - Fullscreen launcher + maximized browser windows
 
 set -e  # Exit on any error
 
@@ -46,7 +46,7 @@ apt update
 
 # Install required packages
 print_status "Installing required packages..."
-apt install -y xorg openbox lightdm firefox-esr python3 python3-flask feh
+apt install -y xorg openbox lightdm firefox-esr python3 python3-flask feh wmctrl
 
 # Create kiosk user if not exists
 if id "$KIOSK_USER" &>/dev/null; then
@@ -179,7 +179,7 @@ cat > $HTML_LAUNCHER << 'EOF'
         </div>
         
         <div class="icon" onclick="launchApp('mousepad')">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCAxLjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
+            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTQwIDQySDhjLTIuMiAwLTQtMS44LTQtNFYxMGMwLTIuMiAxLjgtNCA0LTRoMzJjMi4yIDAgNCA1LjggNCA0djI4YzAgMi4yLTEuOCA0LTQgNHoiLz48cGF0aCBmaWxsPSIjMzMzIiBkPSJNMTIgMThoMjR2MThIMTJ6Ii8+PHRleHQgZmlsbD0iI2ZmZiIgeD0iMTYiIHk9IjMwIiBmb250LXNpemU9IjEyIj7Qv9C+0LvRjNC30L7QstCw0YLQtdC70Y88L3RleHQ+PC9zdmc+" alt="Text Editor">
             <div class="icon-text">Текстовый редактор</div>
         </div>
     </div>
@@ -213,11 +213,6 @@ cat > $HTML_LAUNCHER << 'EOF'
                 .then(data => {
                     console.log('App launched successfully:', command);
                     showStatus('Приложение запущено: ' + getAppName(command));
-                    
-                    // Start monitoring for browser
-                    if (command === 'firefox') {
-                        startBrowserMonitoring();
-                    }
                 })
                 .catch(error => {
                     console.error('Error launching app:', error);
@@ -239,24 +234,6 @@ cat > $HTML_LAUNCHER << 'EOF'
                 'mousepad': 'Текстовый редактор'
             };
             return appNames[command] || command;
-        }
-        
-        function startBrowserMonitoring() {
-            // Check every 2 seconds if browser is still running
-            const browserCheck = setInterval(() => {
-                fetch('http://localhost:8080/status?app=firefox')
-                    .then(response => response.text())
-                    .then(status => {
-                        if (status === 'NOT_RUNNING') {
-                            clearInterval(browserCheck);
-                            showStatus('Браузер закрыт');
-                        }
-                    })
-                    .catch(() => {
-                        // Server error, stop checking
-                        clearInterval(browserCheck);
-                    });
-            }, 2000);
         }
         
         // Prevent right-click context menu
@@ -289,7 +266,7 @@ cat > $HTML_LAUNCHER << 'EOF'
 </html>
 EOF
 
-# Create Python server
+# Create Python server with window management
 print_status "Creating Python server..."
 cat > $PYTHON_SERVER << 'EOF'
 #!/usr/bin/env python3
@@ -322,6 +299,30 @@ def is_process_running(process_name):
         logging.error(f"Error checking process {process_name}: {str(e)}")
         return False
 
+def maximize_firefox_window():
+    """Maximize Firefox window using wmctrl"""
+    try:
+        # Wait for Firefox window to appear
+        time.sleep(2)
+        
+        # Find Firefox window and maximize it
+        result = subprocess.run([
+            'wmctrl', '-l'
+        ], capture_output=True, text=True)
+        
+        for line in result.stdout.split('\n'):
+            if 'Firefox' in line or 'Mozilla Firefox' in line:
+                window_id = line.split()[0]
+                # Maximize the window
+                subprocess.run([
+                    'wmctrl', '-i', '-r', window_id, '-b', 'add,maximized_vert,maximized_horz'
+                ])
+                logging.info(f"Maximized Firefox window: {window_id}")
+                break
+                
+    except Exception as e:
+        logging.error(f"Error maximizing Firefox window: {str(e)}")
+
 @app.route('/')
 def index():
     return send_file('/home/kiosk/kiosk/launcher.html')
@@ -344,14 +345,18 @@ def launch_app():
             logging.error(f"Application not found: {command}")
             return f'ERROR: Application {app_name} not installed', 404
         
-        # For Firefox, launch in new window with normal interface
+        # For Firefox, launch in maximized window
         if command == 'firefox-esr':
-            # Launch Firefox with new window and normal interface
+            # Launch Firefox with new window (not fullscreen)
             process = subprocess.Popen([
                 command,
                 '--new-window',
                 'about:blank'
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Maximize the Firefox window after launch
+            maximize_firefox_window()
+            
         else:
             # For other apps, launch normally
             process = subprocess.Popen([command], 
@@ -431,9 +436,9 @@ EOF
 chown -R $KIOSK_USER:$KIOSK_USER /home/$KIOSK_USER/.config
 chmod +x $OPENBOX_AUTOSTART
 
-# Install unclutter for hiding cursor
-print_status "Installing unclutter for cursor hiding..."
-apt install -y unclutter
+# Install unclutter for hiding cursor and wmctrl for window management
+print_status "Installing additional tools..."
+apt install -y unclutter wmctrl
 
 # Configure LightDM for auto-login
 print_status "Configuring LightDM for auto-login..."
@@ -473,14 +478,15 @@ echo ""
 echo -e "${YELLOW}How it works now:${NC}"
 echo "✅ Лаунчер запускается в полноэкранном режиме (киоск-режим)"
 echo "✅ При нажатии 'Браузер' открывается НОВОЕ окно Firefox"
-echo "✅ Новое окно имеет нормальный интерфейс: вкладки, адресная строка, кнопки"
+echo "✅ Новое окно автоматически РАЗВЕРНУТО (максимизировано)"
+echo "✅ Браузер имеет нормальный интерфейс: вкладки, адресная строка, кнопки"
+echo "✅ Можно сворачивать/разворачивать/закрывать браузер обычными способами"
 echo "✅ Лаунчер остается открытым в фоне в полноэкранном режиме"
-echo "✅ При закрытии браузера можно снова использовать лаунчер"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "1. Reboot the system: sudo reboot"
 echo "2. System starts with fullscreen launcher"
-echo "3. Click 'Browser' to open normal Firefox window"
+echo "3. Click 'Browser' to open maximized Firefox window"
 echo "4. Close Firefox to return to fullscreen launcher"
 echo ""
 echo -e "${GREEN}Setup complete! Please reboot.${NC}"
