@@ -65,11 +65,8 @@ print_status "Creating kiosk directory..."
 mkdir -p $KIOSK_DIR
 chown $KIOSK_USER:$KIOSK_USER $KIOSK_DIR
 
-# Create separate Firefox profile for browser windows
-print_status "Creating separate Firefox profile..."
-sudo -u $KIOSK_USER mkdir -p /home/$KIOSK_USER/.mozilla/firefox
-# Create a simple profile initialization
-sudo -u $KIOSK_USER firefox-esr -CreateProfile "browser" || echo "Firefox profile creation might have issues, continuing..."
+# Skip problematic Firefox profile creation - we'll handle it differently
+print_status "Setting up Firefox configuration..."
 
 # Create HTML launcher
 print_status "Creating HTML launcher..."
@@ -341,12 +338,11 @@ def is_process_running(process_name):
 def launch_browser_normal():
     """Launch browser in completely separate process with normal window"""
     try:
-        # Use a completely separate approach - don't use profile to avoid complexity
+        # Use DISPLAY environment
         env = os.environ.copy()
         env['DISPLAY'] = ':0'
         
-        # Launch Firefox with specific window size and new window
-        # Don't use profile parameter to avoid issues
+        # Launch Firefox with new window but NO kiosk mode
         process = subprocess.Popen([
             'firefox-esr',
             '-new-window',
@@ -362,12 +358,12 @@ def launch_browser_normal():
         return None
 
 def ensure_normal_window():
-    """Ensure browser window is not fullscreen - more aggressive approach"""
+    """Ensure browser window is not fullscreen - aggressive approach"""
     try:
-        time.sleep(4)  # Wait longer for window to appear
+        time.sleep(3)  # Wait for window to appear
         
-        max_attempts = 5
-        for attempt in range(max_attempts):
+        # Multiple attempts to fix the window
+        for attempt in range(10):
             # Get all windows
             result = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True)
             
@@ -379,25 +375,23 @@ def ensure_normal_window():
             
             if firefox_windows:
                 for window_id in firefox_windows:
-                    # Remove fullscreen mode multiple times to be sure
-                    for _ in range(3):
-                        subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
-                                     capture_output=True)
+                    # Force remove fullscreen
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,fullscreen'], 
+                                 capture_output=True)
                     
                     # Remove maximized state
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'remove,maximized_vert,maximized_horz'], 
                                  capture_output=True)
                     
-                    # Set window to reasonable size (not fullscreen)
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,50,50,1200,700'], 
+                    # Set specific size and position
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', '0,100,100,1000,600'], 
                                  capture_output=True)
                     
-                    logging.info(f"Ensured normal window for {window_id} (attempt {attempt + 1})")
+                    logging.info(f"Fixed Firefox window {window_id} to normal size")
                 
-                break  # Success, break out of attempts loop
+                break  # Success
             else:
-                logging.info(f"No Firefox windows found yet, waiting... (attempt {attempt + 1})")
-                time.sleep(1)
+                time.sleep(0.5)  # Wait and try again
                 
     except Exception as e:
         logging.error(f"Error ensuring normal window: {str(e)}")
@@ -424,7 +418,7 @@ def launch_app():
             logging.error(f"Application not found: {command}")
             return f'ERROR: Application {app_name} not installed', 404
         
-        # Special handling for Firefox - use completely separate process
+        # Special handling for Firefox
         if command == 'firefox-esr':
             process = launch_browser_normal()
             if process:
@@ -547,12 +541,11 @@ echo "Kiosk directory: $KIOSK_DIR"
 echo "HTML launcher: $HTML_LAUNCHER"
 echo "Python server: $PYTHON_SERVER"
 echo ""
-echo -e "${YELLOW}Browser Fix Applied:${NC}"
-echo "✅ Упрощена команда создания профиля Firefox"
-echo "✅ Браузер запускается в новой сессии процесса"
-echo "✅ Многократные попытки исправления окна"
-echo "✅ Убраны сложные параметры профиля"
-echo "✅ Увеличено время ожидания для стабильности"
+echo -e "${YELLOW}Fixed Issues:${NC}"
+echo "✅ Убрана проблемная строка создания профиля Firefox"
+echo "✅ Браузер запускается в отдельной сессии"
+echo "✅ Агрессивное управление окнами (10 попыток)"
+echo "✅ Установлен конкретный размер окна 1000x600"
 echo ""
 echo -e "${YELLOW}If browser still opens fullscreen, run:${NC}"
 echo "sudo -u kiosk ./kiosk_control.sh fix-browser"
